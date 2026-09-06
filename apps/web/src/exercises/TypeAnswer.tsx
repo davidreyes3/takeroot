@@ -1,0 +1,108 @@
+import { useEffect, useRef, useState } from 'react';
+import { answersMatch, type Card, type Lexeme } from '@lang/core';
+import { cardFace } from '../face.js';
+import { Word } from '../components/Word.js';
+
+export interface TypeAnswerProps {
+  card: Card;
+  lexeme: Lexeme;
+  onAnswer: (correct: boolean, elapsedMs: number, usedHint: boolean) => void;
+}
+
+/**
+ * Production recall: type the Hebrew.
+ *
+ * The hardest exercise in the app and the only one immune to guessing, which
+ * is why it is what the Leech Gym ends on.
+ *
+ * Grading is forgiving about typography and strict about spelling: niqqud is
+ * optional, final-form slips are forgiven, but a wrong letter is wrong. All of
+ * that lives in `answersMatch` in core, tested independently.
+ */
+export function TypeAnswer({ card, lexeme, onAnswer }: TypeAnswerProps) {
+  const [value, setValue] = useState('');
+  const [state, setState] = useState<'typing' | 'right' | 'wrong'>('typing');
+  const [usedHint, setUsedHint] = useState(false);
+  const shownAt = useRef(Date.now());
+  const inputRef = useRef<HTMLInputElement>(null);
+  const face = cardFace(lexeme, card.template);
+
+  useEffect(() => {
+    setValue('');
+    setState('typing');
+    setUsedHint(false);
+    shownAt.current = Date.now();
+    inputRef.current?.focus();
+  }, [card.id]);
+
+  const submit = () => {
+    if (state !== 'typing') {
+      onAnswer(state === 'right', Date.now() - shownAt.current, usedHint);
+      return;
+    }
+    if (value.trim() === '') return;
+    setState(answersMatch(face.answer, value) ? 'right' : 'wrong');
+  };
+
+  return (
+    <div>
+      <div className="card">
+        <div className="muted">{face.instruction}</div>
+        <Word text={face.prompt} hebrew={face.promptIsHebrew} size="prompt" />
+
+        <input
+          ref={inputRef}
+          className="type-input he"
+          data-state={state === 'typing' ? undefined : state}
+          lang="he"
+          dir="rtl"
+          value={value}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          readOnly={state !== 'typing'}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          aria-label="Type the Hebrew word"
+        />
+
+        {state === 'wrong' && (
+          <div className="stack center">
+            <div className="muted">The answer was</div>
+            <Word text={face.answer} hebrew size="answer" />
+            {lexeme.translit.value && <div className="translit">{lexeme.translit.value}</div>}
+          </div>
+        )}
+
+        {state === 'right' && <div className="banner calm">Correct</div>}
+
+        {state === 'typing' && !usedHint && (
+          <button
+            className="tag"
+            onClick={() => setUsedHint(true)}
+            style={{ cursor: 'pointer' }}
+          >
+            Show me a hint
+          </button>
+        )}
+
+        {state === 'typing' && usedHint && (
+          <div className="muted">
+            Starts with <Word text={face.answer.slice(0, 1)} hebrew /> ·{' '}
+            {face.answer.replace(/\s/gu, '').length} letters
+          </div>
+        )}
+      </div>
+
+      <button className="btn" style={{ marginTop: 18 }} onClick={submit} disabled={state === 'typing' && value.trim() === ''}>
+        {state === 'typing' ? 'Check' : 'Continue'}
+      </button>
+    </div>
+  );
+}

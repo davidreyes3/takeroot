@@ -1,0 +1,262 @@
+/**
+ * Leech detection and the Leech Gym.
+ *
+ * The usual answer to a card you keep failing is to tag it and suspend it,
+ * which is really an admission of defeat. This module is the alternative: detect the
+ * word early, then escalate through progressively more aggressive
+ * interventions until it sticks.
+ *
+ * The escalation is ordered by cognitive-science strength, not by novelty:
+ *
+ *   1. study            re-encode it properly before drilling it
+ *   2. mnemonic         build a keyword image (only when repetition alone has failed)
+ *   3. expanding drill  massed -> spaced retrieval within the session
+ *   4. matching         recognition under mild time pressure
+ *   5. speed            recognition under real time pressure
+ *   6. final test       one *production* recall that actually counts
+ *
+ * Only step 6 touches the FSRS schedule. See "Why drills are not reviews".
+ */
+
+import type { Card, ExerciseKind, Lexeme, ReviewLog } from './types.js';
+
+export interface LeechPolicy {
+  /** Total lapses that mark a card as a leech. The conventional default is 8. */
+  lapseThreshold: number;
+  /** Consecutive `Again` answers that trigger the gym immediately. */
+  againStreakThreshold: number;
+  /** Rolling window of recent reviews used for the accuracy rule. */
+  window: number;
+  /** Accuracy below this over a full window marks a leech. */
+  accuracyThreshold: number;
+}
+
+export const DEFAULT_LEECH_POLICY: LeechPolicy = {
+  // Lower than the conventional 8 on purpose: with an intervention available, catching a
+  // struggling word early is cheap, whereas eight failed reviews is weeks of
+  // frustration for a word you still cannot read.
+  lapseThreshold: 4,
+  againStreakThreshold: 3,
+  window: 6,
+  accuracyThreshold: 0.6,
+};
+
+export type LeechReason = 'lapses' | 'again_streak' | 'low_accuracy';
+
+export interface LeechVerdict {
+  isLeech: boolean;
+  reason?: LeechReason;
+  /** 0..1, how badly the card is doing. Drives how far up the gym it starts. */
+  severity: number;
+}
+
+/**
+ * Decide whether a card needs intervention.
+ *
+ * `recentLogs` should be that card's most recent logs, newest last. Only rows
+ * with `countsForScheduling` are considered, so a bad run inside a drill does
+ * not immediately re-flag a card the learner is already working on.
+ */
+export function assessLeech(
+  card: Card,
+  recentLogs: readonly ReviewLog[],
+  policy: LeechPolicy = DEFAULT_LEECH_POLICY,
+): LeechVerdict {
+  if (card.suspended) return { isLeech: false, severity: 0 };
+
+  if (card.againStreak >= policy.againStreakThreshold) {
+    return {
+      isLeech: true,
+      reason: 'again_streak',
+      severity: Math.min(1, card.againStreak / (policy.againStreakThreshold * 2)),
+    };
+  }
+
+  if (card.fsrs.lapses >= policy.lapseThreshold) {
+    return {
+      isLeech: true,
+      reason: 'lapses',
+      severity: Math.min(1, card.fsrs.lapses / (policy.lapseThreshold * 2)),
+    };
+  }
+
+  const scheduled = recentLogs.filter((l) => l.countsForScheduling).slice(-policy.window);
+  if (scheduled.length >= policy.window) {
+    const passed = scheduled.filter((l) => l.rating > 1).length;
+    const accuracy = passed / scheduled.length;
+    if (accuracy < policy.accuracyThreshold) {
+      return {
+        isLeech: true,
+        reason: 'low_accuracy',
+        severity: Math.min(1, 1 - accuracy),
+      };
+    }
+  }
+
+  return { isLeech: false, severity: 0 };
+}
+
+// --- The gym ---------------------------------------------------------------
+
+export type GymStepKind =
+  | 'study'
+  | 'mnemonic'
+  | 'drill'
+  | 'matching'
+  | 'speed'
+  | 'final_test';
+
+export interface GymStep {
+  kind: GymStepKind;
+  /** The exercise this step renders as, if it is a graded one. */
+  exercise?: ExerciseKind;
+  /** Card ids in presentation order. For `drill`, includes interleaved fillers. */
+  sequence: string[];
+  /** Only ever true on the final test. */
+  countsForScheduling: boolean;
+  /** Shown above the step so the learner knows why they are doing it. */
+  prompt: string;
+  /** Milliseconds allowed per item; undefined means untimed. */
+  timeLimitMs?: number;
+}
+
+export interface GymPlan {
+  targetCardId: string;
+  lexemeId: string;
+  reason: LeechReason;
+  steps: GymStep[];
+}
+
+/**
+ * Build the interleaved repetition sequence: the "say it, go away, come back"
+ * pattern you described.
+ *
+ * The gaps expand (0, 1, 2, then 4 filler items) because expanding retrieval
+ * practice beats both massed repetition and fixed spacing within a session -
+ * each successful recall happens at the edge of forgetting, which is where the
+ * memory strengthening actually happens.
+ *
+ * Degrades safely: with no fillers available it still terminates, returning
+ * plain repetitions rather than looping forever.
+ */
+export function buildDrillSequence(
+  targetCardId: string,
+  fillerCardIds: readonly string[],
+  repeats = 4,
+): string[] {
+  const gaps = [0, 1, 2, 4];
+  const sequence: string[] = [];
+  let fillerIndex = 0;
+
+  const safeRepeats = Math.max(1, Math.min(repeats, 8));
+  for (let i = 0; i < safeRepeats; i++) {
+    const gap = gaps[Math.min(i, gaps.length - 1)] as number;
+    for (let g = 0; g < gap && fillerCardIds.length > 0; g++) {
+      sequence.push(fillerCardIds[fillerIndex % fillerCardIds.length] as string);
+      fillerIndex++;
+    }
+    sequence.push(targetCardId);
+  }
+  return sequence;
+}
+
+export interface GymPlanInput {
+  card: Card;
+  lexeme: Lexeme;
+  verdict: LeechVerdict;
+  /** Other cards available to interleave as filler. */
+  fillerCardIds: readonly string[];
+  /** Cards to populate the matching grid, target excluded. */
+  matchingPoolIds: readonly string[];
+}
+
+/**
+ * Assemble the gym session for one struggling card.
+ *
+ * Two escalation rules worth knowing about:
+ *
+ *  - The mnemonic step only appears once plain repetition has *already*
+ *    failed (severity is high, or the word has real lapses). Asking someone to
+ *    invent an absurd image for every hard word is exhausting, and the
+ *    technique works best when it is reserved for the genuinely stubborn ones.
+ *  - The speed round only appears at high severity. Time pressure on a word
+ *    you barely know produces guessing, not learning.
+ */
+export function buildGymPlan(input: GymPlanInput): GymPlan {
+  const { card, lexeme, verdict, fillerCardIds, matchingPoolIds } = input;
+  const steps: GymStep[] = [];
+  const target = card.id;
+
+  steps.push({
+    kind: 'study',
+    sequence: [target],
+    countsForScheduling: false,
+    prompt: `Let's take another run at ${lexeme.lemma}. Read it, say it out loud, then we'll drill it.`,
+  });
+
+  const wantsMnemonic = !lexeme.mnemonic && (verdict.severity >= 0.5 || card.fsrs.lapses >= 3);
+  if (wantsMnemonic) {
+    steps.push({
+      kind: 'mnemonic',
+      sequence: [target],
+      countsForScheduling: false,
+      prompt:
+        'Repetition alone is not working on this one. Build a memory hook: find an English word that sounds like it, then picture something absurd. The stranger the image, the better it sticks.',
+    });
+  }
+
+  steps.push({
+    kind: 'drill',
+    exercise: 'flashcard',
+    sequence: buildDrillSequence(target, fillerCardIds),
+    countsForScheduling: false,
+    prompt: 'Rapid fire. The word comes back at longer and longer gaps.',
+  });
+
+  if (matchingPoolIds.length >= 3) {
+    steps.push({
+      kind: 'matching',
+      exercise: 'matching',
+      sequence: [target, ...matchingPoolIds.slice(0, 4)],
+      countsForScheduling: false,
+      prompt: 'Match them up.',
+    });
+  }
+
+  if (verdict.severity >= 0.6 && matchingPoolIds.length >= 1) {
+    steps.push({
+      kind: 'speed',
+      exercise: 'speed',
+      sequence: [target, ...matchingPoolIds.slice(0, 1)],
+      countsForScheduling: false,
+      prompt: 'Fast round. Go with your gut.',
+      timeLimitMs: 3000,
+    });
+  }
+
+  steps.push({
+    kind: 'final_test',
+    exercise: 'type',
+    sequence: [target],
+    countsForScheduling: true,
+    prompt: 'Now for real, no help: type it.',
+  });
+
+  return {
+    targetCardId: target,
+    lexemeId: lexeme.id,
+    reason: verdict.reason ?? 'lapses',
+    steps,
+  };
+}
+
+/**
+ * Has the card earned its way out of leech status?
+ *
+ * Requires the final production test to have been passed, not merely the
+ * drills - passing a drill five seconds after seeing the answer proves
+ * nothing about tomorrow.
+ */
+export function graduatesFromGym(finalTestRating: number): boolean {
+  return finalTestRating >= 3;
+}
