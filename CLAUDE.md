@@ -1,8 +1,9 @@
 # Working on this repo
 
-A spaced-repetition language-learning app. Hebrew is the first language, but
-nothing structural is Hebrew-specific — the language-dependent parts are
-isolated in `packages/core/src/hebrew.ts` and `packages/core/src/grammar/`.
+**takeroot** — a spaced-repetition language-learning app. Hebrew is the first
+language, but nothing structural is Hebrew-specific: the language-dependent
+parts are isolated in `packages/core/src/hebrew.ts` and
+`packages/core/src/grammar/`.
 
 **The thesis:** research-grade scheduling, a game-like path, and a real
 intervention for the words that refuse to stick. The first two exist elsewhere;
@@ -229,9 +230,11 @@ should be checked before being relied on.
 - **Never name competitor products** in code, comments, docs, or commits. Refer
   to "serious flashcard tools" / "gamified language apps" instead. This was an
   explicit request and applies to anything committed or published.
-- **Git identity is deliberately neutral**: `dev <dev@localhost>`, set
-  repo-local. Git had no global identity, and the user asked that no personal
-  information land in the repo. Don't replace it with a real address.
+- **Commits are authored with a GitHub noreply address**:
+  `David <57577288+davidreyes3@users.noreply.github.com>`, set repo-local. This
+  attributes commits to the user's GitHub profile and counts toward their
+  contribution graph, while keeping their real email out of a public history.
+  Don't replace it with a real address.
 - The user reviews claims and will push back on reasoning, not just on bugs —
   and has been right to. Re-examine rather than defend.
 - Reports of problems have been accurate and well-diagnosed. Take them
