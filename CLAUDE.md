@@ -20,7 +20,7 @@ several of those decisions look arbitrary until you know the reason.
 
 ```bash
 npm run dev            # http://localhost:5173  (port is pinned, see below)
-npm test               # 262 tests
+npm test               # 278 tests
 npm run test:watch
 npm run typecheck      # tsc -b across the workspace
 npm run content:check  # validate content/, report what the app had to guess
