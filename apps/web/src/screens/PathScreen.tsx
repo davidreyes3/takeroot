@@ -1,7 +1,12 @@
 import { useMemo } from 'react';
 import type { Card, Lexeme } from '@lang/core';
 
-const LESSON_SIZE = 6;
+/**
+ * A lesson wants roughly this many words: enough to be worth opening, few
+ * enough to finish in one sitting.
+ */
+const MIN_LESSON = 4;
+const MAX_LESSON = 8;
 
 export interface LessonNode {
   id: string;
@@ -13,11 +18,93 @@ export interface LessonNode {
 }
 
 /**
- * Build the path.
+ * Pack a unit's words into lessons along the `##` headings they were written
+ * under.
  *
- * Units come from the content files' frontmatter and are chunked into lessons
- * of six words - small enough that a node is finishable in one sitting, which
- * is the whole psychological trick of a stepping-stone path.
+ * Mechanical chunking produced two bad outcomes. Lessons straddled meaning - a
+ * greeting filed together with "yes / no / but / or" - and units ended in
+ * ragged tails: unit 1 finished with a two-word lesson that completed almost
+ * instantly, so the path showed a node as done while the learner was still on
+ * the first one.
+ *
+ * So a group is never split across lessons unless it is larger than
+ * MAX_LESSON, and a group too small to stand alone is absorbed into its
+ * neighbour. Merged lessons are named for both groups; split ones are
+ * numbered.
+ */
+export function packLessons(words: readonly Lexeme[]): { title: string; lexemes: Lexeme[] }[] {
+  const groups: { name: string; words: Lexeme[] }[] = [];
+  for (const word of words) {
+    const last = groups[groups.length - 1];
+    if (last && last.name === word.group) last.words.push(word);
+    else groups.push({ name: word.group, words: [word] });
+  }
+
+  const lessons: { title: string; lexemes: Lexeme[] }[] = [];
+
+  for (const group of groups) {
+    // Too big for one sitting: split into evenly sized numbered parts.
+    if (group.words.length > MAX_LESSON) {
+      lessons.push(...splitEvenly(group.name, group.words));
+      continue;
+    }
+
+    // Small enough to join the lesson before it, if that one has room.
+    const previous = lessons[lessons.length - 1];
+    if (
+      previous &&
+      group.words.length < MIN_LESSON &&
+      previous.lexemes.length + group.words.length <= MAX_LESSON
+    ) {
+      previous.title = `${previous.title} & ${group.name}`;
+      previous.lexemes.push(...group.words);
+      continue;
+    }
+
+    lessons.push({ title: group.name, lexemes: [...group.words] });
+  }
+
+  // A leftover tail still too small folds backwards, so no lesson can be
+  // finished in two answers. Combining may overflow the cap, so the pair is
+  // re-split evenly rather than simply concatenated.
+  const last = lessons[lessons.length - 1];
+  const secondLast = lessons[lessons.length - 2];
+  if (last && secondLast && last.lexemes.length < MIN_LESSON) {
+    const combined = [...secondLast.lexemes, ...last.lexemes];
+    lessons.splice(-2, 2, ...splitEvenly(`${secondLast.title} & ${last.title}`, combined));
+  }
+
+  return lessons;
+}
+
+/**
+ * Divide words into parts that are all as close to the same size as possible.
+ *
+ * Slicing by a fixed size instead leaves a remainder: 50 words in chunks of 8
+ * ends with a lesson of 2, which is exactly the ragged tail this is meant to
+ * avoid. Spreading the remainder across the earlier parts keeps every lesson
+ * within one of every other.
+ */
+function splitEvenly(name: string, words: readonly Lexeme[]): { title: string; lexemes: Lexeme[] }[] {
+  const parts = Math.max(1, Math.ceil(words.length / MAX_LESSON));
+  const base = Math.floor(words.length / parts);
+  const remainder = words.length % parts;
+
+  const out: { title: string; lexemes: Lexeme[] }[] = [];
+  let cursor = 0;
+  for (let p = 0; p < parts; p++) {
+    const size = base + (p < remainder ? 1 : 0);
+    out.push({
+      title: parts === 1 ? name : `${name} ${p + 1}`,
+      lexemes: words.slice(cursor, cursor + size),
+    });
+    cursor += size;
+  }
+  return out;
+}
+
+/**
+ * Build the path.
  *
  * A node unlocks when the one before it is 60% mastered rather than 100%.
  * Requiring perfection would gate the entire course behind whichever word you
@@ -34,26 +121,23 @@ export function buildPath(lexemes: readonly Lexeme[], cards: ReadonlyMap<string,
 
   const nodes: LessonNode[] = [];
   for (const [unit, words] of [...byUnit.entries()].sort((a, b) => a[0] - b[0])) {
-    for (let i = 0; i < words.length; i += LESSON_SIZE) {
-      const chunk = words.slice(i, i + LESSON_SIZE);
-      const lessonNumber = Math.floor(i / LESSON_SIZE) + 1;
-
+    packLessons(words).forEach((lesson, index) => {
       let graduated = 0;
-      for (const lexeme of chunk) {
+      for (const lexeme of lesson.lexemes) {
         const card = cards.get(`${lexeme.id}:recall_he_en`);
         if (card && card.fsrs.state === 2) graduated++;
       }
-      const mastery = chunk.length === 0 ? 0 : graduated / chunk.length;
+      const mastery = lesson.lexemes.length === 0 ? 0 : graduated / lesson.lexemes.length;
 
       nodes.push({
-        id: `u${unit}-l${lessonNumber}`,
+        id: `u${unit}-l${index + 1}`,
         unit,
-        title: chunk[0]?.glosses[0] ?? `Lesson ${lessonNumber}`,
-        lexemes: chunk,
+        title: lesson.title,
+        lexemes: lesson.lexemes,
         mastery,
         status: 'locked',
       });
-    }
+    });
   }
 
   for (let i = 0; i < nodes.length; i++) {

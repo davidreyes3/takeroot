@@ -11,10 +11,16 @@ export interface TypeAnswerProps {
 }
 
 /**
- * Production recall: type the Hebrew.
+ * Production recall: type the answer.
  *
  * The hardest exercise in the app and the only one immune to guessing, which
  * is why it is what the Leech Gym ends on.
+ *
+ * The answer is not always Hebrew. The gym finishes by testing whichever card
+ * is struggling, and for a Hebrew-to-English card the thing to produce is the
+ * English meaning. So the field's direction, language and on-screen keyboard
+ * all follow the *answer*, never an assumption - offering a Hebrew keyboard
+ * for an English answer makes the exercise close to unusable.
  *
  * Grading is forgiving about typography and strict about spelling: niqqud is
  * optional, final-form slips are forgiven, but a wrong letter is wrong. All of
@@ -97,10 +103,10 @@ export function TypeAnswer({ card, lexeme, onAnswer }: TypeAnswerProps) {
 
         <input
           ref={inputRef}
-          className="type-input he"
+          className={face.answerIsHebrew ? 'type-input he' : 'type-input'}
           data-state={state === 'typing' ? undefined : state}
-          lang="he"
-          dir="rtl"
+          lang={face.answerIsHebrew ? 'he' : 'en'}
+          dir={face.answerIsHebrew ? 'rtl' : 'ltr'}
           value={value}
           autoComplete="off"
           autoCorrect="off"
@@ -114,13 +120,13 @@ export function TypeAnswer({ card, lexeme, onAnswer }: TypeAnswerProps) {
               submit();
             }
           }}
-          aria-label="Type the Hebrew word"
+          aria-label={face.answerIsHebrew ? 'Type the Hebrew word' : 'Type the English meaning'}
         />
 
         {state === 'wrong' && (
           <div className="stack center">
             <div className="muted">The answer was</div>
-            <Word text={face.answer} hebrew size="answer" />
+            <Word text={face.answer} hebrew={face.answerIsHebrew} size="answer" />
             {lexeme.translit.value && <div className="translit">{lexeme.translit.value}</div>}
           </div>
         )}
@@ -139,12 +145,12 @@ export function TypeAnswer({ card, lexeme, onAnswer }: TypeAnswerProps) {
 
         {state === 'typing' && usedHint && (
           <div className="muted">
-            Starts with <Word text={face.answer.slice(0, 1)} hebrew /> ·{' '}
+            Starts with <Word text={face.answer.slice(0, 1)} hebrew={face.answerIsHebrew} /> ·{' '}
             {face.answer.replace(/\s/gu, '').length} letters
           </div>
         )}
 
-        {state === 'typing' && (
+        {state === 'typing' && face.answerIsHebrew && (
           <HebrewKeyboard onKey={insert} onBackspace={backspace} onSubmit={submit} />
         )}
       </div>

@@ -263,13 +263,35 @@ Two deliberate constraints:
 
 Once saved, it surfaces on that word's card backs and in its gym sessions.
 
+The builder explains the technique with a worked example, collapsible once it
+is familiar — an empty box labelled "keyword" teaches nobody the method.
+
+### Tabled: generated mnemonic suggestions
+
+Offering a "make one for me" button, or a few suggestions when someone stalls.
+Deliberately not built yet. The elaboration is where the encoding happens, so
+handing over a finished mnemonic trades away most of the benefit. If it does
+get built, the shape should preserve that: suggestions appear only *after* a
+real attempt or a long pause, and as raw material to adapt rather than a
+finished answer to accept.
+
 ---
 
 ## 9. The path
 
-Units come from the frontmatter; each is chunked into lessons of six words —
-small enough to finish in one sitting, which is the psychological trick of a
-stepping-stone path. Mastery rings are drawn with a conic gradient, no SVG.
+Units come from the frontmatter, and lessons come from the `##` headings in
+the content files — so the grouping is authored, not mechanical.
+
+That replaced fixed chunks of six, which failed in two ways worth recording.
+Lessons straddled meaning (a greeting filed with "yes / no / but / or"), and
+units ended in ragged tails: unit 1 finished with a **two-word** lesson that
+completed almost instantly, so the path showed a later node as done while the
+learner was still on the first one.
+
+Now a group is never split unless it exceeds 8 words, a group under 4 is
+absorbed into its neighbour, and any leftover tail is re-split evenly — so no
+lesson can be finished in two answers. Mastery rings are drawn with a conic
+gradient, no SVG.
 
 A node unlocks at **60% mastery of the previous one**, not 100%. Requiring
 perfection would gate the whole course behind whichever single word you find

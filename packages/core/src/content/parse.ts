@@ -101,6 +101,8 @@ interface Frontmatter {
   unit: number;
   title: string;
   tags: string[];
+  /** File-wide default, so headings are free to name a topic instead of a pos. */
+  pos: Pos | null;
 }
 
 /**
@@ -109,7 +111,7 @@ interface Frontmatter {
  * patched forever, and arbitrary YAML in content files is a footgun anyway.
  */
 function parseFrontmatter(lines: string[]): { fm: Frontmatter; endLine: number } {
-  const fm: Frontmatter = { unit: 1, title: '', tags: [] };
+  const fm: Frontmatter = { unit: 1, title: '', tags: [], pos: null };
   if (lines[0]?.trim() !== '---') return { fm, endLine: 0 };
 
   let i = 1;
@@ -128,6 +130,8 @@ function parseFrontmatter(lines: string[]): { fm: Frontmatter; endLine: number }
       if (Number.isFinite(n)) fm.unit = n;
     } else if (key === 'title') {
       fm.title = raw.replace(/^["']|["']$/gu, '');
+    } else if (key === 'pos') {
+      fm.pos = parsePos(raw);
     } else if (key === 'tags') {
       fm.tags = raw
         .replace(/^\[|\]$/gu, '')
@@ -218,7 +222,8 @@ export function parseContentFile(source: string, filePath: string): ParseResult 
     });
   }
 
-  let currentPos: Pos | null = null;
+  let currentPos: Pos | null = fm.pos;
+  let currentGroup = fm.title === '' ? 'Words' : fm.title;
 
   for (let i = endLine; i < lines.length; i++) {
     const raw = lines[i] as string;
@@ -229,7 +234,11 @@ export function parseContentFile(source: string, filePath: string): ParseResult 
 
     const heading = /^#{1,6}\s+(.*)$/u.exec(line);
     if (heading) {
-      const pos = parsePos(heading[1] as string);
+      // A heading always names the lesson. If it happens to name a part of
+      // speech too, it sets that as well - which keeps "## Adjectives" working
+      // exactly as before while freeing "## Greetings" to be a topic.
+      currentGroup = (heading[1] as string).trim();
+      const pos = parsePos(currentGroup);
       if (pos) currentPos = pos;
       continue;
     }
@@ -288,7 +297,7 @@ export function parseContentFile(source: string, filePath: string): ParseResult 
     }
     seen.set(id, lineNo);
 
-    lexemes.push(buildLexeme(entry, pos, id, fm, filePath, lineNo, issues));
+    lexemes.push(buildLexeme(entry, pos, id, fm, currentGroup, filePath, lineNo, issues));
   }
 
   return { lexemes, issues };
@@ -299,6 +308,7 @@ function buildLexeme(
   pos: Pos,
   id: string,
   fm: Frontmatter,
+  group: string,
   filePath: string,
   lineNo: number,
   issues: ContentIssue[],
@@ -408,6 +418,7 @@ function buildLexeme(
     examples,
     tags: [...fm.tags, ...(fields.get('tags')?.[0]?.split(/[\s,]+/u).filter(Boolean) ?? [])],
     unit: fm.unit,
+    group,
     sourceFile: filePath,
     sourceLine: lineNo,
   };

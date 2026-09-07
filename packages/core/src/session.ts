@@ -76,6 +76,29 @@ export interface BuildSessionInput {
   policy?: LeechPolicy;
 }
 
+/**
+ * How much this card is struggling, higher meaning shakier.
+ *
+ * Lapses dominate because a word you have actually forgotten more than once is
+ * the clearest evidence of trouble. Difficulty (FSRS's 1-10 resistance
+ * measure) breaks ties among cards with equal lapse counts, and a card already
+ * flagged as a leech outranks both.
+ */
+function struggleScore(card: Card): number {
+  return card.fsrs.lapses * 2 + card.fsrs.difficulty + (card.isLeech ? 5 : 0);
+}
+
+/**
+ * Is this word shaky enough to be worth drilling?
+ *
+ * FSRS difficulty centres around 5, so "harder than average" is the 5.5 line.
+ * Any lapse at all counts: forgetting a word once already marks it out from
+ * the ones that are simply known.
+ */
+function needsWork(card: Card): boolean {
+  return card.fsrs.lapses > 0 || card.fsrs.difficulty >= 5.5 || card.isLeech;
+}
+
 /** Which exercise to render a normal review as. */
 function exerciseFor(card: Card): ExerciseKind {
   switch (card.template) {
@@ -154,19 +177,30 @@ export function buildSession(input: BuildSessionInput): SessionPlan {
 
   // --- 2. gym
   //
+  // Two rules govern the pool the gym drills against.
+  //
   // One card per word. A word owns up to six cards, so taking cards directly
   // would put the same word into a matching grid several times over - two
   // identical tiles that clear together, which is not a puzzle. Distractors
   // have to be distinct *words* to be distractors at all.
-  const fillerPool: string[] = [];
-  const fillerLexemes = new Set<string>();
-  for (const candidate of active) {
-    if (fillerPool.length >= 20) break;
-    if (candidate.fsrs.state !== 2 || candidate.isLeech) continue;
-    if (fillerLexemes.has(candidate.lexemeId)) continue;
-    fillerLexemes.add(candidate.lexemeId);
-    fillerPool.push(candidate.id);
+  //
+  // Then: prefer words that are themselves shaky. The interleaved items exist
+  // to open a gap between sightings of the target, but they are still full
+  // prompts the learner has to answer, so spending that time on words they
+  // already know well is waste. Ranking by struggle turns the filler from
+  // padding into a second helping of practice where it is actually needed.
+  // Only words already seen can be interleaved; you cannot drill against a
+  // word you have never met.
+  const seen = active
+    .filter((c) => c.fsrs.state === 2 || c.fsrs.state === 3)
+    .sort((a, b) => struggleScore(b) - struggleScore(a));
+
+  const byLexeme = new Map<string, Card>();
+  for (const candidate of seen) {
+    if (!byLexeme.has(candidate.lexemeId)) byLexeme.set(candidate.lexemeId, candidate);
   }
+  const ranked = [...byLexeme.values()].slice(0, 20);
+  const needy = ranked.filter(needsWork);
 
   let gymCount = 0;
   for (const card of leeches) {
@@ -175,13 +209,27 @@ export function buildSession(input: BuildSessionInput): SessionPlan {
     if (!lexeme) continue;
     if (usedLexemes.has(card.lexemeId)) continue;
 
+    // Exclude the target's own word, not merely its own card: a sibling card
+    // of the same word would give the answer away mid-drill.
+    const notTarget = (c: Card) => c.lexemeId !== card.lexemeId;
+    const needyOthers = needy.filter(notTarget);
+    const allOthers = ranked.filter(notTarget);
+
+    // The drill cycles a short list of genuinely shaky words. Repeating two
+    // struggling words is better practice than padding with six solid ones -
+    // and if nothing qualifies, fall back so the drill still has gaps rather
+    // than collapsing into massed repetition.
+    const drillPool = (needyOthers.length >= 2 ? needyOthers : allOthers).slice(0, 6);
+
     const verdict = assessLeech(card, logsByCard.get(card.id) ?? [], policy);
     const plan = buildGymPlan({
       card,
       lexeme,
       verdict,
-      fillerCardIds: fillerPool.filter((id) => id !== card.id),
-      matchingPoolIds: fillerPool.filter((id) => id !== card.id).slice(0, 4),
+      fillerCardIds: drillPool.map((c) => c.id),
+      // Matching wants contrast, so a known word is a perfectly good
+      // distractor there - it is discrimination being tested, not recall.
+      matchingPoolIds: allOthers.slice(0, 4).map((c) => c.id),
     });
     if (take(card, 'gym', plan)) gymCount++;
   }

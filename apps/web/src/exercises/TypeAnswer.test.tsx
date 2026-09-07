@@ -21,6 +21,7 @@ const lexeme: Lexeme = {
   examples: [],
   tags: [],
   unit: 1,
+  group: 'Test',
   sourceFile: 'test.md',
   sourceLine: 1,
 };
@@ -200,5 +201,52 @@ describe('hints', () => {
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
     expect(onAnswer).toHaveBeenCalledWith(true, expect.any(Number), true);
+  });
+});
+
+describe('the field follows the answer, not an assumption', () => {
+  /**
+   * Regression: the gym's final test uses whichever card is struggling. For a
+   * Hebrew-to-English card the answer is English, but the field was hard-wired
+   * to Hebrew - right-to-left, Hebrew font, Hebrew keyboard - which made
+   * typing an English answer close to unusable.
+   */
+  const englishAnswerCard: Card = newCard('lx_1', 'recall_he_en', T0);
+
+  function renderEnglish(onAnswer = vi.fn()) {
+    render(<TypeAnswer card={englishAnswerCard} lexeme={lexeme} onAnswer={onAnswer} />);
+    return { onAnswer, input: screen.getByLabelText('Type the English meaning') as HTMLInputElement };
+  }
+
+  it('shows no Hebrew keyboard when the answer is English', () => {
+    renderEnglish();
+    expect(screen.queryByRole('group', { name: 'Hebrew keyboard' })).toBeNull();
+  });
+
+  it('sets the field left-to-right and in English', () => {
+    const { input } = renderEnglish();
+    expect(input.getAttribute('dir')).toBe('ltr');
+    expect(input.getAttribute('lang')).toBe('en');
+    expect(input.className).not.toMatch(/\bhe\b/);
+  });
+
+  it('accepts and grades an English answer', async () => {
+    const user = userEvent.setup();
+    const { onAnswer, input } = renderEnglish();
+
+    await user.click(input);
+    await user.keyboard('small');
+    await user.click(screen.getByRole('button', { name: 'Check' }));
+
+    expect(screen.getByText('Correct')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(onAnswer).toHaveBeenCalledWith(true, expect.any(Number), false);
+  });
+
+  it('keeps the Hebrew field right-to-left with its keyboard', () => {
+    render(<TypeAnswer card={card} lexeme={lexeme} onAnswer={vi.fn()} />);
+    const input = screen.getByLabelText('Type the Hebrew word');
+    expect(input.getAttribute('dir')).toBe('rtl');
+    expect(screen.getByRole('group', { name: 'Hebrew keyboard' })).toBeInTheDocument();
   });
 });

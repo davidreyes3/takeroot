@@ -471,3 +471,49 @@ input { font: inherit; }
   .kbd-key { font-size: 18px; min-height: 40px; }
   .kbd-key.wide { flex: 0 0 54px; }
 }
+
+/* --- mnemonic explainer -------------------------------------------------- */
+
+.explainer {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.explainer-toggle {
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 11px 14px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.explainer-toggle:hover { color: var(--accent); }
+
+.explainer-body {
+  padding: 0 14px 13px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-dim);
+}
+
+.explainer-body p { margin: 0 0 9px; }
+.explainer-body b { color: var(--text); font-weight: 600; }
+.explainer-body ol { margin: 0 0 9px; padding-left: 19px; }
+.explainer-body li { margin-bottom: 5px; }
+
+.explainer-body .worked {
+  background: var(--accent-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 0;
+}

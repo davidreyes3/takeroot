@@ -49,6 +49,7 @@ const lexeme: Lexeme = {
   examples: [],
   tags: [],
   unit: 1,
+  group: 'Test',
   sourceFile: 'test.md',
   sourceLine: 1,
 };

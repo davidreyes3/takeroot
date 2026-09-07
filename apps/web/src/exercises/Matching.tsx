@@ -126,6 +126,7 @@ export function Matching({ target, pool, onDone }: MatchingProps) {
     } else {
       mistakes.current += 1;
       setWrong(pickedHe);
+      if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => {
         setWrong(null);
         setPickedHe(null);
@@ -134,6 +135,12 @@ export function Matching({ target, pool, onDone }: MatchingProps) {
     }
   }, [pickedHe, pickedEn]);
 
+  /**
+   * While a wrong pair is flashing red the board ignores taps. Accepting them
+   * mid-flash let a stray click land against the still-selected tile and score
+   * phantom mistakes, and it made the board feel unresponsive rather than
+   * deliberate.
+   */
   const stateOf = (id: string, picked: string | null) => {
     if (matched.has(id)) return 'matched';
     if (wrong !== null && picked === id) return 'wrong';
@@ -150,7 +157,9 @@ export function Matching({ target, pool, onDone }: MatchingProps) {
               key={`he-${tile.lexemeId}`}
               className="match"
               data-state={stateOf(tile.lexemeId, pickedHe)}
-              onClick={() => setPickedHe(tile.lexemeId)}
+              onClick={() => {
+                if (wrong === null) setPickedHe(tile.lexemeId);
+              }}
             >
               <Word text={tile.text} hebrew />
             </button>
@@ -162,7 +171,9 @@ export function Matching({ target, pool, onDone }: MatchingProps) {
               key={`en-${tile.lexemeId}`}
               className="match"
               data-state={stateOf(tile.lexemeId, pickedEn)}
-              onClick={() => setPickedEn(tile.lexemeId)}
+              onClick={() => {
+                if (wrong === null) setPickedEn(tile.lexemeId);
+              }}
             >
               {tile.text}
             </button>

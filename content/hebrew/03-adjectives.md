@@ -2,6 +2,7 @@
 unit: 3
 title: Describing things
 tags: [core, agreement]
+pos: adj
 ---
 
 <!--
@@ -10,22 +11,29 @@ singular; the feminine and both plurals are generated, along with the rule
 that produced them, and turned into agreement drills.
 -->
 
-## Adjectives
+## Size and quality
 
 - גָּדוֹל = big, large ; root: ג-ד-ל ; ex: הבית גדול | The house is big
 - קָטָן = small, little ; root: ק-ט-נ ; ex: הכלב קטן | The dog is small
 - טוֹב = good ; root: ט-ו-ב
 - רַע = bad ; root: ר-ע-ע
 - יָפֶה = beautiful, nice ; root: י-פ-ה ; note: ends in ה, so the feminine is spelled the same as the masculine
+
+## Old and new
+
 - חָדָשׁ = new ; root: ח-ד-ש
 - יָשָׁן = old (of things) ; root: י-ש-נ
 - צָעִיר = young ; root: צ-ע-ר
+- זָקֵן = old (of people) ; root: ז-ק-נ
+
+## Hot and cold, hard and easy
+
 - חַם = hot, warm ; root: ח-מ-מ
 - קַר = cold ; root: ק-ר-ר
 - קָשֶׁה = hard, difficult ; root: ק-ש-ה
 - קַל = easy, light ; root: ק-ל-ל
 
-## Adjectives
+## Colours
 
 - לָבָן = white ; root: ל-ב-נ ; ex: החולצה לבנה | The shirt is white
 - שָׁחוֹר = black ; root: ש-ח-ר

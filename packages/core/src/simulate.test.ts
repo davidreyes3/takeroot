@@ -34,6 +34,7 @@ function lexemeAt(i: number): Lexeme {
     examples: [],
     tags: [],
     unit: Math.floor(i / 20) + 1,
+    group: 'Test',
     sourceFile: 'gen.md',
     sourceLine: i,
     ...{},

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Lexeme } from '@lang/core';
 import { Matching } from './Matching.js';
@@ -19,6 +19,7 @@ function word(id: string, lemma: string, gloss: string): Lexeme {
     examples: [],
     tags: [],
     unit: 1,
+    group: 'Test',
     sourceFile: 'test.md',
     sourceLine: 1,
   };
@@ -52,14 +53,41 @@ describe('completing the grid', () => {
   it('counts a mistake without blocking completion', async () => {
     const onDone = vi.fn();
     const user = userEvent.setup();
-    render(<Matching target={target} pool={others} onDone={onDone} />);
+    const { container } = render(<Matching target={target} pool={others} onDone={onDone} />);
 
     await user.click(screen.getByRole('button', { name: target.lemma }));
     await user.click(screen.getByRole('button', { name: 'we' })); // wrong pairing
+
+    // The board flashes the wrong pair and ignores taps until it clears.
+    await waitFor(() => expect(container.querySelector('[data-state="wrong"]')).toBeNull(), {
+      timeout: 2000,
+    });
+
     await solve(user, [target, ...others]);
 
     expect(onDone).toHaveBeenCalledTimes(1);
-    expect(onDone.mock.calls[0]?.[0].mistakes).toBeGreaterThan(0);
+    expect(onDone.mock.calls[0]?.[0].mistakes).toBe(1);
+  });
+
+  it('ignores taps while the wrong pair is still flashing', async () => {
+    const onDone = vi.fn();
+    const user = userEvent.setup();
+    const { container } = render(<Matching target={target} pool={others} onDone={onDone} />);
+
+    await user.click(screen.getByRole('button', { name: target.lemma }));
+    await user.click(screen.getByRole('button', { name: 'we' }));
+
+    // Clicking during the flash used to land against the still-selected tile
+    // and score phantom mistakes.
+    await user.click(screen.getByRole('button', { name: 'good night' }));
+    await user.click(screen.getByRole('button', { name: 'how are you' }));
+
+    await waitFor(() => expect(container.querySelector('[data-state="wrong"]')).toBeNull(), {
+      timeout: 2000,
+    });
+    await solve(user, [target, ...others]);
+
+    expect(onDone.mock.calls[0]?.[0].mistakes).toBe(1);
   });
 });
 

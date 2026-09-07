@@ -47,18 +47,41 @@ Semicolons separate fields, so **a gloss cannot contain a semicolon**.
 | `note` | `note: also means "young"` | Free text shown on the card back |
 | `tags` | `tags: food travel` | Space or comma separated |
 
-### Headings set the part of speech
+### Headings are lessons
+
+A `##` heading names a lesson on the path. Words under one heading are learned
+together, so group things that belong together:
 
 ```markdown
-## Nouns
-- יֶלֶד = boy, child
+## Greetings
+- שָׁלוֹם = hello, goodbye, peace
+- בֹּקֶר טוֹב = good morning
 
-## Adjectives
-- גָּדוֹל = big
+## Colours
+- לָבָן = white
 ```
 
-Recognised headings: `Nouns`, `Verbs`, `Adjectives`, `Adverbs`, `Prepositions`,
-`Pronouns`, `Numbers`, `Particles`, `Phrases` (singular forms work too).
+**Aim for 4–8 words per heading.** A group smaller than 4 is merged into the
+one before it (`Greetings & Yes and no`); a group larger than 8 is split into
+numbered parts (`Colours 1`, `Colours 2`). Groups are never mixed unless one is
+too small to stand alone, so a lesson never straddles two topics.
+
+A heading that happens to name a part of speech sets that too:
+`Nouns`, `Verbs`, `Adjectives`, `Adverbs`, `Prepositions`, `Pronouns`,
+`Numbers`, `Particles`, `Phrases` (singular forms work as well).
+
+For headings that name a topic rather than a word class, set the file's default
+in the frontmatter:
+
+```markdown
+---
+unit: 1
+title: First words
+pos: phrase
+---
+```
+
+Individual entries can still override with `; pos: pron`.
 
 ### Frontmatter sets the unit
 
@@ -70,9 +93,9 @@ tags: [visual]
 ---
 ```
 
-`unit` is what orders the path. Words are introduced unit by unit, and within a
-unit in the order you wrote them — so the sequence you author is the sequence
-you learn.
+`unit` is what orders the path, and `pos` sets the file's default part of
+speech. Words are introduced unit by unit, and within a unit in the order you
+wrote them — so the sequence you author is the sequence you learn.
 
 ## Things worth knowing
 

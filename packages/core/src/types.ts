@@ -60,6 +60,15 @@ export interface Lexeme {
   tags: string[];
   /** Unit number from the content file's frontmatter. Drives path order. */
   unit: number;
+  /**
+   * The `##` heading this entry sits under, e.g. "Greetings".
+   *
+   * This is the lesson grouping. Chunking the path mechanically produced
+   * lessons that straddled meaning - a greeting filed with "yes / no / but" -
+   * and left ragged two-word tails that completed instantly. The headings you
+   * already write encode the grouping properly, so the path uses them.
+   */
+  group: string;
   /** Source file path, for round-tripping edits back to markdown. */
   sourceFile: string;
   sourceLine: number;

@@ -25,6 +25,7 @@ function lexeme(id: string, overrides: Partial<Lexeme> = {}): Lexeme {
     examples: [],
     tags: [],
     unit: 1,
+    group: 'Test',
     sourceFile: 'test.md',
     sourceLine: 1,
     ...overrides,
@@ -364,5 +365,97 @@ describe('gym pool contains distinct words', () => {
     const matching = gym.steps.find((s) => s.kind === 'matching');
     // The target heads the sequence exactly once.
     expect(matching?.sequence.filter((id) => id === gym.targetCardId)).toHaveLength(1);
+  });
+});
+
+describe('drill filler is spent on words that need it', () => {
+  function withStats(lexemeId: string, lapses: number, difficulty: number): Card {
+    const c = newCard(lexemeId, 'recall_he_en', T0);
+    return {
+      ...c,
+      fsrs: { ...c.fsrs, state: 2, stability: 20, reps: 10, due: T0 + 30 * DAY, lapses, difficulty },
+    };
+  }
+
+  function gymFor(cards: Card[], lexemes: Lexeme[]) {
+    const plan = buildSession({
+      cards,
+      lexemes,
+      logsByCard: noLogs,
+      now: T0,
+      config: { warmUpCount: 0 },
+    });
+    return plan.items.find((i) => i.kind === 'gym')?.gymPlan;
+  }
+
+  it('puts shaky words into the drill ahead of well-known ones', () => {
+    const lexemes = [
+      lexeme('lx_leech'),
+      lexeme('lx_shaky1'),
+      lexeme('lx_shaky2'),
+      ...Array.from({ length: 8 }, (_, i) => lexeme(`lx_solid${i}`)),
+    ];
+    const cards = [
+      dueCard('lx_leech', T0 - DAY, { fsrs: { ...dueCard('lx_leech', T0).fsrs, lapses: 9 } }),
+      withStats('lx_shaky1', 5, 8),
+      withStats('lx_shaky2', 4, 7),
+      ...Array.from({ length: 8 }, (_, i) => withStats(`lx_solid${i}`, 0, 2)),
+    ];
+
+    const gym = gymFor(cards, lexemes);
+    const drill = gym?.steps.find((s) => s.kind === 'drill');
+    const fillers = drill!.sequence.filter((id) => id !== gym!.targetCardId);
+
+    expect(fillers.length).toBeGreaterThan(0);
+    // Every interleaved item should be one of the struggling words, not the
+    // eight solid ones, because the shaky pool is large enough to fill it.
+    for (const id of fillers) {
+      expect(['lx_shaky1:recall_he_en', 'lx_shaky2:recall_he_en']).toContain(id);
+    }
+  });
+
+  it('falls back to known words when there are not enough shaky ones', () => {
+    const lexemes = [lexeme('lx_leech'), ...Array.from({ length: 6 }, (_, i) => lexeme(`lx_solid${i}`))];
+    const cards = [
+      dueCard('lx_leech', T0 - DAY, { fsrs: { ...dueCard('lx_leech', T0).fsrs, lapses: 9 } }),
+      ...Array.from({ length: 6 }, (_, i) => withStats(`lx_solid${i}`, 0, 2)),
+    ];
+
+    const gym = gymFor(cards, lexemes);
+    const drill = gym?.steps.find((s) => s.kind === 'drill');
+    // Still a usable drill rather than an empty one.
+    expect(drill!.sequence.length).toBeGreaterThan(4);
+  });
+
+  it('never uses another card of the target word as filler', () => {
+    // A sibling card would show the answer mid-drill.
+    const lexemes = [lexeme('lx_leech'), ...Array.from({ length: 5 }, (_, i) => lexeme(`lx_o${i}`))];
+    const leechCard = dueCard('lx_leech', T0 - DAY, {
+      fsrs: { ...dueCard('lx_leech', T0).fsrs, lapses: 9 },
+    });
+    const sibling: Card = {
+      ...newCard('lx_leech', 'type_he', T0),
+      fsrs: { ...newCard('lx_leech', 'type_he', T0).fsrs, state: 2, stability: 9, reps: 4, due: T0 + DAY },
+    };
+    const cards = [leechCard, sibling, ...Array.from({ length: 5 }, (_, i) => withStats(`lx_o${i}`, 1, 5))];
+
+    const gym = gymFor(cards, lexemes);
+    for (const step of gym!.steps) {
+      const fillers = step.sequence.filter((id) => id !== gym!.targetCardId);
+      expect(fillers).not.toContain(sibling.id);
+    }
+  });
+
+  it('never drills a word that has never been seen', () => {
+    const lexemes = [lexeme('lx_leech'), ...Array.from({ length: 5 }, (_, i) => lexeme(`lx_new${i}`))];
+    const cards = [
+      dueCard('lx_leech', T0 - DAY, { fsrs: { ...dueCard('lx_leech', T0).fsrs, lapses: 9 } }),
+      ...Array.from({ length: 5 }, (_, i) => newCard(`lx_new${i}`, 'recall_he_en', T0)),
+    ];
+
+    const gym = gymFor(cards, lexemes);
+    const drill = gym!.steps.find((s) => s.kind === 'drill');
+    const fillers = drill!.sequence.filter((id) => id !== gym!.targetCardId);
+    expect(fillers).toHaveLength(0); // nothing known enough to interleave
   });
 });
