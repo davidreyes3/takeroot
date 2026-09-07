@@ -414,7 +414,10 @@ describe('drill filler is spent on words that need it', () => {
     }
   });
 
-  it('falls back to known words when there are not enough shaky ones', () => {
+  it('runs on the target alone rather than padding with known words', () => {
+    // Deliberate: solid words are not worth spending rapid-fire time on. With
+    // nothing shaky to interleave, the drill leans on direction alternation
+    // instead, which keeps each repetition a real retrieval.
     const lexemes = [lexeme('lx_leech'), ...Array.from({ length: 6 }, (_, i) => lexeme(`lx_solid${i}`))];
     const cards = [
       dueCard('lx_leech', T0 - DAY, { fsrs: { ...dueCard('lx_leech', T0).fsrs, lapses: 9 } }),
@@ -422,9 +425,12 @@ describe('drill filler is spent on words that need it', () => {
     ];
 
     const gym = gymFor(cards, lexemes);
-    const drill = gym?.steps.find((s) => s.kind === 'drill');
-    // Still a usable drill rather than an empty one.
-    expect(drill!.sequence.length).toBeGreaterThan(4);
+    const drill = gym!.steps.find((s) => s.kind === 'drill')!;
+
+    expect(drill.sequence.length).toBeGreaterThan(0);
+    for (const id of drill.sequence) {
+      expect(id.startsWith('lx_solid')).toBe(false);
+    }
   });
 
   it('never uses another card of the target word as filler', () => {
@@ -457,5 +463,84 @@ describe('drill filler is spent on words that need it', () => {
     const drill = gym!.steps.find((s) => s.kind === 'drill');
     const fillers = drill!.sequence.filter((id) => id !== gym!.targetCardId);
     expect(fillers).toHaveLength(0); // nothing known enough to interleave
+  });
+});
+
+describe('the gym drills a word from both directions', () => {
+  it('rotates the target through its recognition cards', () => {
+    const lexemes = [lexeme('lx_leech')];
+    const leechCard = dueCard('lx_leech', T0 - DAY, {
+      fsrs: { ...dueCard('lx_leech', T0).fsrs, lapses: 9 },
+    });
+    const reverse: Card = {
+      ...newCard('lx_leech', 'recall_en_he', T0),
+      fsrs: { ...newCard('lx_leech', 'recall_en_he', T0).fsrs, state: 2, stability: 6, reps: 3 },
+    };
+
+    const plan = buildSession({
+      cards: [leechCard, reverse],
+      lexemes,
+      logsByCard: noLogs,
+      now: T0,
+      config: { warmUpCount: 0 },
+    });
+
+    const gym = plan.items.find((i) => i.kind === 'gym')!.gymPlan!;
+    const drill = gym.steps.find((s) => s.kind === 'drill')!;
+
+    // Both directions appear, so no two consecutive prompts are identical.
+    expect(new Set(drill.sequence)).toEqual(new Set([leechCard.id, reverse.id]));
+    for (let i = 1; i < drill.sequence.length; i++) {
+      expect(drill.sequence[i]).not.toBe(drill.sequence[i - 1]);
+    }
+  });
+
+  it('still runs a useful drill when nothing else has been learned yet', () => {
+    // The very first leech in a fresh collection: no other words are mature.
+    const lexemes = [lexeme('lx_leech')];
+    const leechCard = dueCard('lx_leech', T0 - DAY, {
+      fsrs: { ...dueCard('lx_leech', T0).fsrs, lapses: 9 },
+    });
+
+    const plan = buildSession({
+      cards: [leechCard],
+      lexemes,
+      logsByCard: noLogs,
+      now: T0,
+      config: { warmUpCount: 0 },
+    });
+
+    const gym = plan.items.find((i) => i.kind === 'gym')!.gymPlan!;
+    const drill = gym.steps.find((s) => s.kind === 'drill')!;
+    expect(drill.sequence.length).toBeGreaterThan(0);
+    expect(drill.countsForScheduling).toBe(false);
+  });
+
+  it('does not pad the drill with words the learner already knows', () => {
+    const lexemes = [lexeme('lx_leech'), ...Array.from({ length: 8 }, (_, i) => lexeme(`lx_solid${i}`))];
+    const solid = Array.from({ length: 8 }, (_, i) => {
+      const c = newCard(`lx_solid${i}`, 'recall_he_en', T0);
+      return {
+        ...c,
+        fsrs: { ...c.fsrs, state: 2 as const, stability: 40, reps: 12, due: T0 + 60 * DAY, difficulty: 2, lapses: 0 },
+      };
+    });
+    const leechCard = dueCard('lx_leech', T0 - DAY, {
+      fsrs: { ...dueCard('lx_leech', T0).fsrs, lapses: 9 },
+    });
+
+    const plan = buildSession({
+      cards: [leechCard, ...solid],
+      lexemes,
+      logsByCard: noLogs,
+      now: T0,
+      config: { warmUpCount: 0 },
+    });
+
+    const gym = plan.items.find((i) => i.kind === 'gym')!.gymPlan!;
+    const drill = gym.steps.find((s) => s.kind === 'drill')!;
+    for (const id of drill.sequence) {
+      expect(id.startsWith('lx_solid')).toBe(false);
+    }
   });
 });

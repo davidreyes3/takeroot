@@ -216,16 +216,30 @@ export function buildSession(input: BuildSessionInput): SessionPlan {
     const allOthers = ranked.filter(notTarget);
 
     // The drill cycles a short list of genuinely shaky words. Repeating two
-    // struggling words is better practice than padding with six solid ones -
-    // and if nothing qualifies, fall back so the drill still has gaps rather
-    // than collapsing into massed repetition.
-    const drillPool = (needyOthers.length >= 2 ? needyOthers : allOthers).slice(0, 6);
+    // struggling words is better practice than padding with six solid ones.
+    // When nothing qualifies the drill runs with no filler at all, which is
+    // fine now that the target alternates direction each time round.
+    const drillPool = needyOthers.slice(0, 6);
+
+    // The target's own recognition cards, primary first. Rotating through them
+    // means each repetition asks a different direction rather than repeating a
+    // prompt the learner can echo from short-term memory.
+    const variants = [
+      card,
+      ...active.filter(
+        (c) =>
+          c.lexemeId === card.lexemeId &&
+          c.id !== card.id &&
+          (c.template === 'recall_he_en' || c.template === 'recall_en_he'),
+      ),
+    ].map((c) => c.id);
 
     const verdict = assessLeech(card, logsByCard.get(card.id) ?? [], policy);
     const plan = buildGymPlan({
       card,
       lexeme,
       verdict,
+      targetVariantIds: variants,
       fillerCardIds: drillPool.map((c) => c.id),
       // Matching wants contrast, so a known word is a perfectly good
       // distractor there - it is discrimination being tested, not recall.

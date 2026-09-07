@@ -190,7 +190,8 @@ Then it escalates, ordered by evidence strength rather than novelty:
    table. You asked not to open with a challenge; this is that.
 2. **Mnemonic** — only when repetition has *already* failed. §8.
 3. **Expanding drill** — your "pound it in, go away, come back" mechanic. The
-   target reappears at gaps of 0, 1, 2, then 4 filler items.
+   target reappears at gaps of 0, 1, 2, then 4 items, and **flips direction
+   each time** — Hebrew→English, then English→Hebrew, and round again.
 4. **Matching** — recognition under mild pressure.
 5. **Speed round** — recognition under real pressure, high severity only. Time
    pressure on a word you barely know produces guessing, not learning.
@@ -210,7 +211,24 @@ about your short-term buffer, not your memory. So the gym ends on a single
 what reschedules the card.
 
 Expanding gaps rather than fixed ones because each successful recall then
-happens near the edge of forgetting, which is where strengthening happens.
+happens nearer the edge of forgetting, which is where strengthening happens.
+
+### What goes in the gaps
+
+Two rules, and the second corrected an earlier mistake.
+
+**Interleaved words are ones that are themselves shaky** — lapsed, or above
+average FSRS difficulty. They are full prompts the learner has to answer, so
+spending that time on words already known is waste.
+
+**When nothing qualifies, the drill runs on the target alone** rather than
+padding with solid words. That is safe because the target *alternates
+direction* on each repetition. The weakness of massed practice is repeating an
+identical prompt, which reads the answer out of the short-term buffer;
+Hebrew→English and English→Hebrew are genuinely different retrievals, and both
+cards already exist for every word. An earlier version padded with known words
+to preserve the gap, which protected the mechanic at the cost of the learner's
+time — alternation preserves both.
 
 ---
 

@@ -129,21 +129,33 @@ export interface GymPlan {
 
 /**
  * Build the interleaved repetition sequence: the "say it, go away, come back"
- * pattern you described.
+ * pattern.
+ *
+ * Two things are happening at once.
  *
  * The gaps expand (0, 1, 2, then 4 filler items) because expanding retrieval
  * practice beats both massed repetition and fixed spacing within a session -
- * each successful recall happens at the edge of forgetting, which is where the
- * memory strengthening actually happens.
+ * each successful recall happens nearer the edge of forgetting, which is where
+ * the strengthening actually happens.
  *
- * Degrades safely: with no fillers available it still terminates, returning
- * plain repetitions rather than looping forever.
+ * And each time the target comes back it comes back in a *different
+ * direction*: Hebrew-to-English, then English-to-Hebrew, and round again.
+ * That matters more than it looks. Repeating an identical prompt back to back
+ * mostly reads the answer out of short-term memory, whereas flipping the
+ * direction is a genuinely different retrieval each time. It also means the
+ * drill still works when there is nothing else to interleave - the gap is
+ * filled by a real task rather than padding.
+ *
+ * Degrades safely: with neither variants nor fillers it still terminates.
  */
 export function buildDrillSequence(
-  targetCardId: string,
+  targetCardIds: readonly string[],
   fillerCardIds: readonly string[],
   repeats = 4,
 ): string[] {
+  const variants = targetCardIds.filter((id) => id !== '');
+  if (variants.length === 0) return [];
+
   const gaps = [0, 1, 2, 4];
   const sequence: string[] = [];
   let fillerIndex = 0;
@@ -155,7 +167,7 @@ export function buildDrillSequence(
       sequence.push(fillerCardIds[fillerIndex % fillerCardIds.length] as string);
       fillerIndex++;
     }
-    sequence.push(targetCardId);
+    sequence.push(variants[i % variants.length] as string);
   }
   return sequence;
 }
@@ -164,6 +176,11 @@ export interface GymPlanInput {
   card: Card;
   lexeme: Lexeme;
   verdict: LeechVerdict;
+  /**
+   * The target word's cards, primary first. The drill rotates through these so
+   * each repetition asks a different direction rather than repeating a prompt.
+   */
+  targetVariantIds?: readonly string[];
   /** Other cards available to interleave as filler. */
   fillerCardIds: readonly string[];
   /** Cards to populate the matching grid, target excluded. */
@@ -184,6 +201,10 @@ export interface GymPlanInput {
  */
 export function buildGymPlan(input: GymPlanInput): GymPlan {
   const { card, lexeme, verdict, fillerCardIds, matchingPoolIds } = input;
+  const variants =
+    input.targetVariantIds && input.targetVariantIds.length > 0
+      ? [...input.targetVariantIds]
+      : [card.id];
   const steps: GymStep[] = [];
   const target = card.id;
 
@@ -208,9 +229,12 @@ export function buildGymPlan(input: GymPlanInput): GymPlan {
   steps.push({
     kind: 'drill',
     exercise: 'flashcard',
-    sequence: buildDrillSequence(target, fillerCardIds),
+    sequence: buildDrillSequence(variants, fillerCardIds),
     countsForScheduling: false,
-    prompt: 'Rapid fire. The word comes back at longer and longer gaps.',
+    prompt:
+      variants.length > 1
+        ? 'Rapid fire. The word comes back at longer gaps, and from both directions.'
+        : 'Rapid fire. The word comes back at longer and longer gaps.',
   });
 
   if (matchingPoolIds.length >= 3) {
