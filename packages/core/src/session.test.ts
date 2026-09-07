@@ -298,3 +298,71 @@ describe('end to end: a card travels from new to scheduled', () => {
     expect(replan.items.some((i) => i.cardId === after.id)).toBe(false);
   });
 });
+
+describe('gym pool contains distinct words', () => {
+  /**
+   * Regression: the pool was built from cards, and a word owns several cards,
+   * so the same word reached the matching grid more than once. Two identical
+   * tiles greyed out together and the grid could never be completed.
+   */
+  function matureCard(lexemeId: string, template: Card['template']): Card {
+    const c = newCard(lexemeId, template, T0);
+    return { ...c, fsrs: { ...c.fsrs, state: 2, stability: 8, reps: 5, due: T0 + 30 * DAY } };
+  }
+
+  it('never offers two cards of the same word as distractors', () => {
+    const lexemes = [lexeme('lx_leech'), ...Array.from({ length: 4 }, (_, i) => lexeme(`lx_${i}`))];
+
+    // Every healthy word contributes three mature cards.
+    const healthy = lexemes
+      .slice(1)
+      .flatMap((l) => [
+        matureCard(l.id, 'recall_he_en'),
+        matureCard(l.id, 'recall_en_he'),
+        matureCard(l.id, 'type_he'),
+      ]);
+
+    const leech = dueCard('lx_leech', T0 - DAY, {
+      fsrs: { ...dueCard('lx_leech', T0).fsrs, lapses: 9 },
+    });
+
+    const plan = buildSession({
+      cards: [leech, ...healthy],
+      lexemes,
+      logsByCard: noLogs,
+      now: T0,
+      config: { warmUpCount: 0 },
+    });
+
+    const gym = plan.items.find((i) => i.kind === 'gym');
+    expect(gym?.gymPlan).toBeDefined();
+
+    const cardToLexeme = new Map([leech, ...healthy].map((c) => [c.id, c.lexemeId]));
+    for (const step of gym!.gymPlan!.steps) {
+      if (step.kind !== 'matching') continue;
+      const words = step.sequence.map((id) => cardToLexeme.get(id));
+      expect(new Set(words).size).toBe(words.length);
+    }
+  });
+
+  it('does not put the word being drilled in its own distractor list', () => {
+    const lexemes = [lexeme('lx_leech'), ...Array.from({ length: 4 }, (_, i) => lexeme(`lx_${i}`))];
+    const healthy = lexemes.slice(1).map((l) => matureCard(l.id, 'recall_he_en'));
+    const leech = dueCard('lx_leech', T0 - DAY, {
+      fsrs: { ...dueCard('lx_leech', T0).fsrs, lapses: 9 },
+    });
+
+    const plan = buildSession({
+      cards: [leech, ...healthy],
+      lexemes,
+      logsByCard: noLogs,
+      now: T0,
+      config: { warmUpCount: 0 },
+    });
+
+    const gym = plan.items.find((i) => i.kind === 'gym')!.gymPlan!;
+    const matching = gym.steps.find((s) => s.kind === 'matching');
+    // The target heads the sequence exactly once.
+    expect(matching?.sequence.filter((id) => id === gym.targetCardId)).toHaveLength(1);
+  });
+});

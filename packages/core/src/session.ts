@@ -153,10 +153,20 @@ export function buildSession(input: BuildSessionInput): SessionPlan {
   }
 
   // --- 2. gym
-  const fillerPool = active
-    .filter((c) => c.fsrs.state === 2 && !c.isLeech)
-    .slice(0, 20)
-    .map((c) => c.id);
+  //
+  // One card per word. A word owns up to six cards, so taking cards directly
+  // would put the same word into a matching grid several times over - two
+  // identical tiles that clear together, which is not a puzzle. Distractors
+  // have to be distinct *words* to be distractors at all.
+  const fillerPool: string[] = [];
+  const fillerLexemes = new Set<string>();
+  for (const candidate of active) {
+    if (fillerPool.length >= 20) break;
+    if (candidate.fsrs.state !== 2 || candidate.isLeech) continue;
+    if (fillerLexemes.has(candidate.lexemeId)) continue;
+    fillerLexemes.add(candidate.lexemeId);
+    fillerPool.push(candidate.id);
+  }
 
   let gymCount = 0;
   for (const card of leeches) {

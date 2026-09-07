@@ -37,7 +37,27 @@ function shuffle<T>(items: readonly T[], seed: number): T[] {
  * Easy, and never on its own gets a word out of the gym.
  */
 export function Matching({ target, pool, onDone }: MatchingProps) {
-  const words = useMemo(() => [target, ...pool.slice(0, 4)], [target.id, pool]);
+  /**
+   * De-duplicate by word.
+   *
+   * The gym's pool is assembled from *cards*, and one word owns several cards,
+   * so the same word can legitimately arrive twice. Rendering it twice put two
+   * identical tiles on the board that greyed out together and made the grid
+   * unfinishable. The pool is filtered upstream too; this is the belt to that
+   * pair of braces, because a stuck exercise strands the learner completely.
+   */
+  const words = useMemo(() => {
+    const seen = new Set<string>();
+    const unique: Lexeme[] = [];
+    for (const candidate of [target, ...pool]) {
+      if (seen.has(candidate.id)) continue;
+      seen.add(candidate.id);
+      unique.push(candidate);
+      if (unique.length === 5) break;
+    }
+    return unique;
+  }, [target, pool]);
+
   const seed = useMemo(() => words.length * 7919 + target.id.length, [words, target.id]);
 
   const hebrewTiles = useMemo<Tile[]>(
@@ -69,6 +89,31 @@ export function Matching({ target, pool, onDone }: MatchingProps) {
     };
   }, []);
 
+  /**
+   * Completion is derived from state, not signalled from inside the click
+   * handler.
+   *
+   * The original version fired `onDone` at the moment of the final match, and
+   * compared a Set of word ids against a tile count - so any mismatch between
+   * those two numbers meant the grid could never report finished, and the
+   * learner had no way out but to abandon the session. Deriving it means the
+   * grid re-checks whenever state settles and cannot be left hanging.
+   */
+  const finished = useRef(false);
+  const onDoneRef = useRef(onDone);
+  useEffect(() => {
+    onDoneRef.current = onDone;
+  });
+
+  useEffect(() => {
+    if (finished.current) return;
+    // Fewer than two pairs is not a game; hand back rather than stick.
+    if (words.length >= 2 && matched.size < words.length) return;
+
+    finished.current = true;
+    onDoneRef.current({ mistakes: mistakes.current, elapsedMs: Date.now() - startedAt.current });
+  }, [matched, words.length]);
+
   useEffect(() => {
     if (pickedHe === null || pickedEn === null) return;
 
@@ -78,10 +123,6 @@ export function Matching({ target, pool, onDone }: MatchingProps) {
       setMatched(next);
       setPickedHe(null);
       setPickedEn(null);
-
-      if (next.size === words.length) {
-        onDone({ mistakes: mistakes.current, elapsedMs: Date.now() - startedAt.current });
-      }
     } else {
       mistakes.current += 1;
       setWrong(pickedHe);
@@ -102,7 +143,6 @@ export function Matching({ target, pool, onDone }: MatchingProps) {
 
   return (
     <div>
-      <div className="banner calm">Match each word to its meaning.</div>
       <div className="match-grid">
         <div className="match-col">
           {hebrewTiles.map((tile) => (
