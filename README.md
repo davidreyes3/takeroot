@@ -1,10 +1,16 @@
-# Hebrew trainer
+# takeroot
 
 A spaced-repetition language app: research-grade scheduling, a game-like path,
 and a real intervention for the words that refuse to stick.
 
-Works for any language — the Hebrew-specific parts (niqqud, agreement rules)
-are isolated in `packages/core/src/hebrew.ts` and `grammar/`.
+Most flashcard tools schedule well and start badly. Most language apps start
+well and schedule badly. Neither does much about the twenty words that defeat
+you — they get tagged and suspended, which is giving up. That gap is the point
+of this app.
+
+Hebrew is the first language loaded, but the engine is language-agnostic: the
+Hebrew-specific parts (niqqud, agreement rules) are isolated in
+`packages/core/src/hebrew.ts` and `grammar/`.
 
 ## Running it
 
@@ -52,3 +58,13 @@ enforces it, which is what keeps the native path cheap.
 ## Design
 
 See [`docs/PLAN.md`](docs/PLAN.md).
+
+## A note on the seeded vocabulary
+
+The Hebrew words in `content/hebrew/` exist to demonstrate the pipeline, not to
+be a course. They were generated rather than written by a native speaker, so
+check them against a source you trust before relying on them.
+
+## Licence
+
+MIT — see [`LICENSE`](LICENSE).
