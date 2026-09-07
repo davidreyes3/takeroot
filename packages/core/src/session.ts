@@ -100,7 +100,7 @@ function needsWork(card: Card): boolean {
 }
 
 /** Which exercise to render a normal review as. */
-function exerciseFor(card: Card): ExerciseKind {
+export function exerciseFor(card: Card): ExerciseKind {
   switch (card.template) {
     case 'type_he':
       return 'type';

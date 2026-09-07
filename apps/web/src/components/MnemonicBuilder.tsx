@@ -21,13 +21,21 @@ export function MnemonicBuilder({
   lexeme,
   onSave,
   onSkip,
+  initialKeyword = '',
+  initialImage = '',
+  cancelLabel = 'Skip',
 }: {
   lexeme: Lexeme;
   onSave: (keyword: string, image: string) => void;
   onSkip: () => void;
+  /** Pre-fill when editing a mnemonic that already exists. */
+  initialKeyword?: string;
+  initialImage?: string;
+  /** "Skip" reads oddly outside the gym flow this was built for. */
+  cancelLabel?: string;
 }) {
-  const [keyword, setKeyword] = useState('');
-  const [image, setImage] = useState('');
+  const [keyword, setKeyword] = useState(initialKeyword);
+  const [image, setImage] = useState(initialImage);
   const [showHelp, setShowHelp] = useState(true);
   const canSave = keyword.trim() !== '' && image.trim() !== '';
 
@@ -102,7 +110,7 @@ export function MnemonicBuilder({
 
       <div className="row" style={{ marginTop: 18 }}>
         <button className="btn secondary" onClick={onSkip}>
-          Skip
+          {cancelLabel}
         </button>
         <button className="btn" disabled={!canSave} onClick={() => onSave(keyword.trim(), image.trim())}>
           Save it

@@ -73,6 +73,20 @@ describe('store initialisation', () => {
     expect(await db.cards.count()).toBe(first);
   });
 
+  it('is safe against overlapping calls, as React StrictMode makes in development', async () => {
+    // StrictMode mounts, unmounts and remounts every component once in dev,
+    // firing the App effect that calls init() twice before the first has a
+    // chance to write its cards. Both calls would otherwise read an empty
+    // `existing` table and race to bulkAdd the same rows, and the loser
+    // throws a Dexie BulkError - harmless in effect, since the winner's rows
+    // stand, but a real unhandled rejection logged to the console on every
+    // first install.
+    await expect(Promise.all([useApp.getState().init(), useApp.getState().init()])).resolves.toBeDefined();
+
+    expect(useApp.getState().ready).toBe(true);
+    expect(await db.cards.count()).toBe(useApp.getState().cards.size);
+  });
+
   it('generates the agreement table for adjectives', async () => {
     await useApp.getState().init();
     const katan = useApp.getState().lexemes.find((l) => l.lemmaBare === 'קטן');
@@ -199,6 +213,65 @@ describe('the path', () => {
     await useApp.getState().init();
     const { lexemes, cards } = useApp.getState();
     expect(buildPath(lexemes, cards).every((n) => n.mastery === 0)).toBe(true);
+  });
+});
+
+describe('practice anything', () => {
+  it('drills a card without ever touching its schedule', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Practice' }));
+    await user.click(await screen.findByRole('button', { name: /small/i }));
+    await user.click(await screen.findByRole('button', { name: 'Recognize' }));
+
+    await user.click(await screen.findByRole('button', { name: /show answer/i }));
+    await user.click(screen.getByText('Good'));
+
+    const katan = useApp.getState().lexemes.find((l) => l.lemmaBare === 'קטן')!;
+    const cardId = `${katan.id}:recall_he_en`;
+
+    // A rating was given, but the card is exactly as fresh as before: this is
+    // the countsForScheduling: false path, the same one the Leech Gym drills use.
+    expect(useApp.getState().cards.get(cardId)!.fsrs.state).toBe(0);
+
+    const logs = await db.logs.where('cardId').equals(cardId).toArray();
+    expect(logs).toHaveLength(1);
+    expect(logs[0]?.countsForScheduling).toBe(false);
+
+    // Let the due-count preview effect (which re-fires on every card change,
+    // practice included) settle before the test tears the tree down.
+    expect(await screen.findByRole('button', { name: 'Recognize' })).toBeInTheDocument();
+  });
+
+  it('offers tier-3 agreement cards even though they are locked in the normal path', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Practice' }));
+    await user.click(await screen.findByRole('button', { name: /small/i }));
+
+    // קטן is an adjective with real fs/mp/fp contrasts, gated to tier 3 in a
+    // normal session - Practice does not honour that gate.
+    expect(await screen.findByRole('button', { name: 'Feminine' })).toBeInTheDocument();
+  });
+});
+
+describe('mnemonics library', () => {
+  it('saves a mnemonic outside of the gym and shows it on the list', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(await screen.findByRole('button', { name: 'Mnemonics' }));
+    await user.click(await screen.findByRole('button', { name: /small/i }));
+
+    await user.type(screen.getByLabelText(/sounds like/i), 'cotton');
+    await user.type(screen.getByLabelText(/picture that/i), 'a tiny cotton ball');
+    await user.click(screen.getByRole('button', { name: 'Save it' }));
+
+    const katan = useApp.getState().lexemes.find((l) => l.lemmaBare === 'קטן')!;
+    expect(await db.mnemonics.get(katan.id)).toMatchObject({ keyword: 'cotton' });
+    expect(await screen.findByRole('button', { name: /cotton/i })).toBeInTheDocument();
   });
 });
 

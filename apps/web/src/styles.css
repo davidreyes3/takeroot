@@ -100,6 +100,26 @@ input { font: inherit; }
 .pill.alert { background: var(--warn-soft); border-color: transparent; color: var(--warn); }
 .pill.alert b { color: var(--warn); }
 
+.tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  padding: 9px 12px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.tab[data-active="true"] { color: var(--text); border-bottom-color: var(--accent); }
+
 /* --- path --------------------------------------------------------------- */
 
 .path { display: flex; flex-direction: column; gap: 0; position: relative; }
@@ -322,6 +342,16 @@ input { font: inherit; }
 
 .banner.calm { background: var(--accent-soft); color: var(--accent); }
 
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .steps { display: flex; gap: 5px; margin-bottom: 14px; }
 .step { flex: 1; height: 4px; border-radius: 2px; background: var(--border); }
 .step[data-done="true"] { background: var(--accent); }
@@ -373,6 +403,25 @@ input { font: inherit; }
 }
 
 .summary-row:last-child { border-bottom: none; }
+
+.summary-row.pressable {
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.lesson-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  margin: 4px 0;
+}
 
 .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .dot[data-r="1"] { background: var(--danger); }

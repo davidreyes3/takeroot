@@ -32,6 +32,18 @@ import { contentFiles } from './content.js';
 /** Rolling window of answer times, used as the learner's personal baseline. */
 const TIMING_WINDOW = 30;
 
+/**
+ * Guards `init` against overlapping calls.
+ *
+ * React StrictMode mounts, unmounts and remounts every component once in
+ * development, firing the effect that calls init() twice before the first
+ * run has written a single card. Both would otherwise read the cards table
+ * as empty and race to bulkAdd the same rows, and the loser throws a Dexie
+ * BulkError. Sharing one in-flight promise makes the second caller just wait
+ * for the first instead of repeating its reads.
+ */
+let initPromise: Promise<void> | null = null;
+
 interface AppState {
   ready: boolean;
   lexemes: Lexeme[];
@@ -76,30 +88,38 @@ export const useApp = create<AppState>((set, get) => ({
   sessionResults: [],
 
   async init() {
-    const { lexemes, issues } = parseContentFiles(contentFiles);
-    const now = Date.now();
+    if (initPromise) return initPromise;
+    initPromise = (async () => {
+      const { lexemes, issues } = parseContentFiles(contentFiles);
+      const now = Date.now();
 
-    const existing = await db.cards.toArray();
-    const { created } = syncCards(lexemes, existing, now);
-    if (created.length > 0) await db.cards.bulkAdd(created);
+      const existing = await db.cards.toArray();
+      const { created } = syncCards(lexemes, existing, now);
+      if (created.length > 0) await db.cards.bulkAdd(created);
 
-    const all = await db.cards.toArray();
-    const mnemonics = await db.mnemonics.toArray();
-    const byLexeme = new Map(mnemonics.map((m) => [m.lexemeId, m]));
-    for (const lexeme of lexemes) {
-      const m = byLexeme.get(lexeme.id);
-      if (m) lexeme.mnemonic = { keyword: m.keyword, image: m.image, createdAt: m.createdAt, shownCount: m.shownCount };
+      const all = await db.cards.toArray();
+      const mnemonics = await db.mnemonics.toArray();
+      const byLexeme = new Map(mnemonics.map((m) => [m.lexemeId, m]));
+      for (const lexeme of lexemes) {
+        const m = byLexeme.get(lexeme.id);
+        if (m) lexeme.mnemonic = { keyword: m.keyword, image: m.image, createdAt: m.createdAt, shownCount: m.shownCount };
+      }
+
+      const retention = await getSetting('desiredRetention', 0.9);
+
+      set({
+        ready: true,
+        lexemes,
+        issues,
+        cards: new Map(all.map((c) => [c.id, c])),
+        desiredRetention: retention,
+      });
+    })();
+    try {
+      await initPromise;
+    } finally {
+      initPromise = null;
     }
-
-    const retention = await getSetting('desiredRetention', 0.9);
-
-    set({
-      ready: true,
-      lexemes,
-      issues,
-      cards: new Map(all.map((c) => [c.id, c])),
-      desiredRetention: retention,
-    });
   },
 
   async startSession() {

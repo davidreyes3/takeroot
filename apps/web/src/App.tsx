@@ -1,13 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useRegisterSW } from 'virtual:pwa-register/react';
 import { buildSession, type SessionStats } from '@lang/core';
 import { useApp } from './store.js';
 import { recentLogsFor } from './db.js';
 import { PathScreen } from './screens/PathScreen.js';
+import { PracticeScreen } from './screens/PracticeScreen.js';
+import { MnemonicsScreen } from './screens/MnemonicsScreen.js';
 import { SessionScreen } from './screens/SessionScreen.js';
+
+type View = 'path' | 'practice' | 'mnemonics';
 
 export function App() {
   const { ready, lexemes, cards, plan, cursor, issues, init, startSession, endSession } = useApp();
   const [stats, setStats] = useState<SessionStats | null>(null);
+  const [view, setView] = useState<View>('path');
+  const {
+    needRefresh: [needRefresh],
+    updateServiceWorker,
+  } = useRegisterSW();
 
   useEffect(() => {
     void init();
@@ -95,19 +105,46 @@ export function App() {
         </div>
       )}
 
-      <PathScreen lexemes={lexemes} cards={cards} unitTitles={unitTitles} />
-
-      <div className="study-bar">
-        <div className="study-bar-inner">
-          <button className="btn" onClick={() => void startSession()} disabled={nothingToDo}>
-            {nothingToDo
-              ? 'All caught up'
-              : stats
-                ? `Study — ${stats.dueCount} due${stats.newHeldBack ? '' : `, ${Math.min(8, stats.newAvailable)} new`}`
-                : 'Study'}
+      {needRefresh && (
+        <div className="banner calm">
+          An update is ready.{' '}
+          <button className="link-btn" onClick={() => void updateServiceWorker(true)}>
+            Reload to apply
           </button>
         </div>
-      </div>
+      )}
+
+      <nav className="tabs">
+        <button className="tab" data-active={view === 'path'} onClick={() => setView('path')}>
+          Path
+        </button>
+        <button className="tab" data-active={view === 'practice'} onClick={() => setView('practice')}>
+          Practice
+        </button>
+        <button className="tab" data-active={view === 'mnemonics'} onClick={() => setView('mnemonics')}>
+          Mnemonics
+        </button>
+      </nav>
+
+      {view === 'path' && <PathScreen lexemes={lexemes} cards={cards} unitTitles={unitTitles} />}
+      {view === 'practice' && (
+        <PracticeScreen lexemes={lexemes} cards={cards} unitTitles={unitTitles} />
+      )}
+      {view === 'mnemonics' && <MnemonicsScreen lexemes={lexemes} unitTitles={unitTitles} />}
+
+      {view === 'path' && (
+        <div className="study-bar">
+          <div className="study-bar-inner">
+            <button className="btn" onClick={() => void startSession()} disabled={nothingToDo}>
+              {nothingToDo
+                ? 'All caught up'
+                : stats
+                  ? `Study — ${stats.dueCount} due${stats.newHeldBack ? '' : `, ${Math.min(8, stats.newAvailable)} new`}`
+                  : 'Study'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

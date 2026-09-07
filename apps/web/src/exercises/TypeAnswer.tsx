@@ -10,6 +10,42 @@ export interface TypeAnswerProps {
   onAnswer: (correct: boolean, elapsedMs: number, usedHint: boolean) => void;
 }
 
+const KEYBOARD_VISIBLE_KEY = 'keyboardVisible';
+
+/**
+ * Default the on-screen keyboard to hidden on touch devices and shown on
+ * desktop. A phone's own Hebrew keyboard is usually a better typing surface
+ * once installed; a mouse-driven desktop has no such option, so the on-screen
+ * one should just be there. An explicit toggle always overrides this.
+ *
+ * Reach through `window`, never bare globals - see HebrewKeyboard.tsx.
+ */
+function loadKeyboardVisible(): boolean {
+  try {
+    const stored = window.localStorage.getItem(KEYBOARD_VISIBLE_KEY);
+    if (stored === 'true') return true;
+    if (stored === 'false') return false;
+  } catch {
+    // Private browsing, blocked site data, thumbnail capture: fall through.
+  }
+  try {
+    if (typeof window.matchMedia === 'function') {
+      return !window.matchMedia('(pointer: coarse)').matches;
+    }
+  } catch {
+    // matchMedia can throw in some embedded/test environments.
+  }
+  return true;
+}
+
+function saveKeyboardVisible(visible: boolean): void {
+  try {
+    window.localStorage.setItem(KEYBOARD_VISIBLE_KEY, String(visible));
+  } catch {
+    // A remembered preference is a nicety; never let it break the exercise.
+  }
+}
+
 /**
  * Production recall: type the answer.
  *
@@ -30,6 +66,7 @@ export function TypeAnswer({ card, lexeme, onAnswer }: TypeAnswerProps) {
   const [value, setValue] = useState('');
   const [state, setState] = useState<'typing' | 'right' | 'wrong'>('typing');
   const [usedHint, setUsedHint] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(loadKeyboardVisible);
   const shownAt = useRef(Date.now());
   const inputRef = useRef<HTMLInputElement>(null);
   const face = cardFace(lexeme, card.template);
@@ -151,7 +188,23 @@ export function TypeAnswer({ card, lexeme, onAnswer }: TypeAnswerProps) {
         )}
 
         {state === 'typing' && face.answerIsHebrew && (
-          <HebrewKeyboard onKey={insert} onBackspace={backspace} onSubmit={submit} />
+          <>
+            <button
+              type="button"
+              className="kbd-toggle"
+              onClick={() => {
+                setKeyboardVisible((v) => {
+                  saveKeyboardVisible(!v);
+                  return !v;
+                });
+              }}
+            >
+              {keyboardVisible ? 'Hide keyboard' : 'Show keyboard'}
+            </button>
+            {keyboardVisible && (
+              <HebrewKeyboard onKey={insert} onBackspace={backspace} onSubmit={submit} />
+            )}
+          </>
         )}
       </div>
 

@@ -4,7 +4,33 @@ import userEvent from '@testing-library/user-event';
 import { newCard, type Card, type Lexeme } from '@lang/core';
 import { TypeAnswer } from './TypeAnswer.js';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  try {
+    window.localStorage.clear();
+  } catch {
+    /* ignore */
+  }
+  // @ts-expect-error - test-only cleanup of a property we may have added
+  delete window.matchMedia;
+});
+
+/** jsdom has no matchMedia; simulate a device's pointer type for one test. */
+function mockPointer(coarse: boolean) {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    value: (query: string) => ({
+      matches: query.includes('coarse') ? coarse : !coarse,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  });
+}
 
 const T0 = Date.UTC(2026, 0, 1);
 
@@ -125,6 +151,47 @@ describe('the on-screen keyboard drives the exercise', () => {
     await user.click(screen.getByRole('button', { name: 'Check' }));
 
     expect(screen.queryByRole('group', { name: 'Hebrew keyboard' })).toBeNull();
+  });
+});
+
+describe('the keyboard can be hidden behind a toggle', () => {
+  it('is shown by default on a desktop (fine pointer)', () => {
+    mockPointer(false);
+    renderExercise();
+    expect(screen.getByRole('group', { name: 'Hebrew keyboard' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hide keyboard' })).toBeInTheDocument();
+  });
+
+  it('is hidden by default on a touch device (coarse pointer)', () => {
+    mockPointer(true);
+    renderExercise();
+    expect(screen.queryByRole('group', { name: 'Hebrew keyboard' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Show keyboard' })).toBeInTheDocument();
+  });
+
+  it('toggles on click and remembers the choice for next time', async () => {
+    mockPointer(false);
+    const user = userEvent.setup();
+    renderExercise();
+
+    await user.click(screen.getByRole('button', { name: 'Hide keyboard' }));
+    expect(screen.queryByRole('group', { name: 'Hebrew keyboard' })).toBeNull();
+
+    cleanup();
+    renderExercise();
+    expect(screen.queryByRole('group', { name: 'Hebrew keyboard' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Show keyboard' })).toBeInTheDocument();
+  });
+
+  it('still lets you type with the keyboard hidden, using the physical keyboard', async () => {
+    mockPointer(true);
+    const user = userEvent.setup();
+    const { input } = renderExercise();
+
+    await user.click(input);
+    await user.keyboard('קטן{Enter}');
+
+    expect(screen.getByText('Correct')).toBeInTheDocument();
   });
 });
 
