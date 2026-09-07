@@ -224,13 +224,24 @@ export function parseContentFile(source: string, filePath: string): ParseResult 
 
   let currentPos: Pos | null = fm.pos;
   let currentGroup = fm.title === '' ? 'Words' : fm.title;
+  // HTML comments span lines, and authors put worked examples inside them.
+  // Without tracking the close tag those examples get parsed as real entries.
+  let inComment = false;
 
   for (let i = endLine; i < lines.length; i++) {
     const raw = lines[i] as string;
     const line = raw.trim();
     const lineNo = i + 1;
 
-    if (line === '' || line.startsWith('<!--')) continue;
+    if (inComment) {
+      if (line.includes('-->')) inComment = false;
+      continue;
+    }
+    if (line.startsWith('<!--')) {
+      if (!line.includes('-->')) inComment = true;
+      continue;
+    }
+    if (line === '') continue;
 
     const heading = /^#{1,6}\s+(.*)$/u.exec(line);
     if (heading) {

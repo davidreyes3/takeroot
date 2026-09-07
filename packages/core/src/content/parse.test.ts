@@ -252,3 +252,41 @@ describe('parseContentFiles', () => {
     expect(issues.some((i) => /Already defined in a\.md/.test(i.message))).toBe(true);
   });
 });
+
+describe('HTML comments', () => {
+  /**
+   * Regression: only the opening `<!--` line was skipped, so worked examples
+   * written inside a comment block were parsed as real vocabulary. The starter
+   * files' own instructions triggered this.
+   */
+  it('ignores entries inside a multi-line comment', () => {
+    const { lexemes } = parse(
+      `## Nouns\n<!--\nPaste words like this:\n- כֶּלֶב = dog\n-->\n- יֶלֶד = boy\n`,
+    );
+    expect(lexemes).toHaveLength(1);
+    expect(lexemes[0]?.glosses).toEqual(['boy']);
+  });
+
+  it('ignores a single-line comment', () => {
+    const { lexemes } = parse(`## Nouns\n<!-- - כֶּלֶב = dog -->\n- יֶלֶד = boy\n`);
+    expect(lexemes).toHaveLength(1);
+  });
+
+  it('resumes parsing after the comment closes', () => {
+    const { lexemes } = parse(
+      `## Nouns\n- אִישׁ = man\n<!--\n- כֶּלֶב = dog\n-->\n- יֶלֶד = boy\n`,
+    );
+    expect(lexemes.map((l) => l.glosses[0])).toEqual(['man', 'boy']);
+  });
+
+  it('does not report a comment example as a duplicate', () => {
+    const { issues } = parse(`## Nouns\n- יֶלֶד = boy\n<!--\n- יֶלֶד = boy\n-->\n`);
+    expect(issues.filter((i) => i.severity === 'error')).toHaveLength(0);
+  });
+
+  it('survives an unterminated comment without eating the whole file', () => {
+    // Malformed, but it must not throw or silently lose everything above it.
+    const { lexemes } = parse(`## Nouns\n- יֶלֶד = boy\n<!--\n- כֶּלֶב = dog\n`);
+    expect(lexemes.map((l) => l.glosses[0])).toEqual(['boy']);
+  });
+});
