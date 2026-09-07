@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { answersMatch, type Card, type Lexeme } from '@lang/core';
 import { cardFace } from '../face.js';
 import { Word } from '../components/Word.js';
+import { HebrewKeyboard } from '../components/HebrewKeyboard.js';
 
 export interface TypeAnswerProps {
   card: Card;
@@ -27,6 +28,13 @@ export function TypeAnswer({ card, lexeme, onAnswer }: TypeAnswerProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const face = cardFace(lexeme, card.template);
 
+  /**
+   * Where to put the caret after an on-screen key. React re-renders a
+   * controlled input with the caret at the end, so a tap in the middle of a
+   * word would otherwise jump you to the end and make corrections impossible.
+   */
+  const pendingCaret = useRef<number | null>(null);
+
   useEffect(() => {
     setValue('');
     setState('typing');
@@ -34,6 +42,43 @@ export function TypeAnswer({ card, lexeme, onAnswer }: TypeAnswerProps) {
     shownAt.current = Date.now();
     inputRef.current?.focus();
   }, [card.id]);
+
+  useLayoutEffect(() => {
+    const caret = pendingCaret.current;
+    if (caret === null) return;
+    pendingCaret.current = null;
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus();
+    input.setSelectionRange(caret, caret);
+  }, [value]);
+
+  /** Replace the selection (or insert at the caret) with `text`. */
+  const insert = (text: string) => {
+    if (state !== 'typing') return;
+    const input = inputRef.current;
+    const start = input?.selectionStart ?? value.length;
+    const end = input?.selectionEnd ?? start;
+    setValue(value.slice(0, start) + text + value.slice(end));
+    pendingCaret.current = start + text.length;
+  };
+
+  /** Delete the selection, or the character before the caret. */
+  const backspace = () => {
+    if (state !== 'typing') return;
+    const input = inputRef.current;
+    const start = input?.selectionStart ?? value.length;
+    const end = input?.selectionEnd ?? start;
+
+    if (start !== end) {
+      setValue(value.slice(0, start) + value.slice(end));
+      pendingCaret.current = start;
+      return;
+    }
+    if (start === 0) return;
+    setValue(value.slice(0, start - 1) + value.slice(start));
+    pendingCaret.current = start - 1;
+  };
 
   const submit = () => {
     if (state !== 'typing') {
@@ -97,6 +142,10 @@ export function TypeAnswer({ card, lexeme, onAnswer }: TypeAnswerProps) {
             Starts with <Word text={face.answer.slice(0, 1)} hebrew /> ·{' '}
             {face.answer.replace(/\s/gu, '').length} letters
           </div>
+        )}
+
+        {state === 'typing' && (
+          <HebrewKeyboard onKey={insert} onBackspace={backspace} onSubmit={submit} />
         )}
       </div>
 

@@ -237,3 +237,68 @@ describe('rendering', () => {
     expect(hebrew?.getAttribute('lang')).toBe('he');
   });
 });
+
+describe('progress survives a reload', () => {
+  it('keeps scheduling state across an app restart', async () => {
+    // Study one card.
+    await useApp.getState().init();
+    await useApp.getState().startSession();
+    const cardId = useApp.getState().plan!.items[0]!.cardId;
+    await useApp.getState().answer({
+      cardId,
+      rating: 3,
+      elapsedMs: 1700,
+      exercise: 'flashcard',
+    });
+    const studied = useApp.getState().cards.get(cardId)!.fsrs;
+
+    // Simulate closing the app: wipe every scrap of in-memory state, keeping
+    // only what was written to IndexedDB. This is what a code change plus a
+    // page reload does.
+    useApp.setState({
+      ready: false,
+      lexemes: [],
+      issues: [],
+      cards: new Map(),
+      plan: null,
+      cursor: 0,
+      recentTimings: [],
+      sessionResults: [],
+    });
+
+    await useApp.getState().init();
+
+    const reloaded = useApp.getState().cards.get(cardId)!.fsrs;
+    expect(reloaded).toEqual(studied);
+    expect(reloaded.reps).toBe(1);
+    expect(await db.logs.count()).toBe(1);
+  });
+
+  it('keeps history when a word is re-imported from edited content', async () => {
+    await useApp.getState().init();
+    const katan = useApp.getState().lexemes.find((l) => l.lemmaBare === 'קטן')!;
+    const cardId = `${katan.id}:recall_he_en`;
+
+    await useApp.getState().answer({
+      cardId,
+      rating: 3,
+      elapsedMs: 1500,
+      exercise: 'flashcard',
+    });
+    const before = useApp.getState().cards.get(cardId)!.fsrs;
+
+    // Re-running init is what happens after any edit to the content files.
+    await useApp.getState().init();
+
+    expect(useApp.getState().cards.get(cardId)!.fsrs).toEqual(before);
+  });
+
+  it('does not orphan cards when a gloss is edited', async () => {
+    // Card identity is the consonantal spelling plus part of speech, so
+    // retranslating a word must not create a second, empty card.
+    await useApp.getState().init();
+    const countBefore = await db.cards.count();
+    await useApp.getState().init();
+    expect(await db.cards.count()).toBe(countBefore);
+  });
+});

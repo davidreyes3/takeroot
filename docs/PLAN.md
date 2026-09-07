@@ -365,12 +365,42 @@ export/import.
 **Next, in order:**
 
 1. Multiple choice, speed round, cloze, form drills — the four spec'd exercises
-2. Verb conjugation (binyanim) — the big grammar piece, needs real morphology
-3. PWA manifest + service worker + push notifications
-4. FSRS parameter optimizer (`fsrs-browser`, WASM) once there's history to train
-5. In-app card editing writing back to markdown
-6. Audio — TTS, or recorded, for listening exercises
-7. Playwright end-to-end and an accessibility pass
+2. **Confusable words** — see below
+3. Verb conjugation (binyanim) — the big grammar piece, needs real morphology
+4. PWA manifest + service worker + push notifications
+5. FSRS parameter optimizer (`fsrs-browser`, WASM) once there's history to train
+6. In-app card editing writing back to markdown
+7. Audio — TTS, or recorded, for listening exercises
+8. Playwright end-to-end and an accessibility pass
+
+### Confusable words
+
+The problem: "I've seen this word before, it looks different now, and I can't
+remember what the difference was." That is not a memory failure, it's an
+*interference* failure — two similar words competing, and drilling either one
+alone doesn't resolve it.
+
+The fix is to make the confusion explicit: link similar words, and let you tap
+through to see them side by side, contrasted.
+
+Most of the data is already there:
+
+- **Shared root.** `מוֹרֶה`/`מוֹרָה` (teacher m/f) share י-ר-ה. Roots are already
+  parsed, so this grouping is free.
+- **Spelling distance.** Edit distance over the normalised consonantal form
+  catches `כֶּלֶב` (dog) versus `לֵב` (heart), and every minimal pair that the
+  content validator already detects for a different reason.
+- **Sound distance.** Edit distance over the transliteration catches pairs that
+  look unalike but sound alike — the ones that trip you when speaking.
+
+Worth doing beyond a "related words" panel: **when two linked words are both
+struggling, put them in the same matching grid.** Contrastive practice is what
+actually resolves interference; seeing them apart never does. That makes this a
+Leech Gym feature, not just a browsing one.
+
+Open question: computing this pairwise is O(n²), fine at a few thousand words
+but not forever. Root-grouping first, then distance only within a bucket, keeps
+it cheap.
 
 ---
 
