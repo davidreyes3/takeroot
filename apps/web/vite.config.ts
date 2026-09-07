@@ -5,6 +5,12 @@ import { fileURLToPath } from 'node:url';
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
+  /**
+   * GitHub Pages serves a project site from a subdirectory
+   * (davidreyes3.github.io/takeroot/), so built asset URLs have to be prefixed.
+   * Only the Pages build sets this; local dev and preview stay at the root.
+   */
+  base: process.env['GITHUB_PAGES'] === 'true' ? '/takeroot/' : '/',
   plugins: [react()],
   resolve: { alias: { '@lang/core': r('../../packages/core/src/index.ts') } },
   server: {
