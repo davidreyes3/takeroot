@@ -56,8 +56,10 @@ apps/web          React 19 + Vite 6 PWA, local-first
   exercises/        Flashcard, TypeAnswer, Matching, GymRunner
   components/       Word, HebrewKeyboard, AgreementTable, MnemonicBuilder
 
-content/hebrew/   hand-written vocabulary markdown (the source of truth)
+content/hebrew/   the user's vocabulary, as markdown tables (source of truth)
 docs/PLAN.md      design decisions and rationale
+docs/source-vocabulary.md   their original pasted list, archived unparsed
+.github/workflows/deploy.yml   builds and publishes to GitHub Pages
 ```
 
 **The core/app boundary is enforced by a test**, not a convention:
@@ -255,28 +257,59 @@ unless it comes from a source the user trusts.
 
 ---
 
+## Where it lives
+
+| | |
+|---|---|
+| Repository | https://github.com/davidreyes3/takeroot (public, MIT, branch `main`) |
+| Live app | https://davidreyes3.github.io/takeroot/ |
+| Deploy | `.github/workflows/deploy.yml` — rebuilds on every push to `main`, gated on tests, typecheck and content validation |
+| Local | `npm run dev` → http://localhost:5173 |
+
+**The live site and localhost are different origins**, so they hold entirely
+separate IndexedDB databases and therefore separate study histories. This is
+the single most important consequence of deploying, and it is not yet solved
+for the user — see item 1 below.
+
+---
+
 ## Current state
 
-Working: content pipeline with validation, FSRS-6 scheduling, card generation
-with tier gating, leech detection, the full gym escalation, session queue, path
-screen, three exercises (flashcard / typing with an on-screen Hebrew keyboard /
-matching), mnemonic builder with a worked example, local persistence, backup
-export and import.
+Working: content pipeline with validation and markdown-table support, FSRS-6
+scheduling, card generation with tier gating, leech detection, the full gym
+escalation, session queue, path screen, three exercises (flashcard / typing
+with an on-screen Hebrew keyboard / matching), mnemonic builder with a worked
+example, local persistence, GitHub Pages deployment.
 
 Next, roughly in order:
 
-1. The four spec'd but unbuilt exercises: multiple choice, speed round, cloze,
+1. **Export / Import UI.** `exportBackup()` and `importBackup()` already exist
+   in `db.ts` but nothing calls them. Until something does, there is no way to
+   move progress from localhost to the deployed site, and the two diverge. This
+   is the top priority precisely *because* the app is now deployed.
+2. **PWA manifest + service worker.** Installing to an iPhone home screen for
+   free was the whole reason for choosing a web app over paying Apple's
+   $99/year. Now that it's hosted, this is what cashes that in. Push
+   notifications follow (iOS 16.4+ supports them for installed PWAs).
+3. The four spec'd but unbuilt exercises: multiple choice, speed round, cloze,
    form drills. (`GymRunner` currently filters out `speed` steps.)
-2. **Confusable words** — link words by shared root, spelling distance and
+4. **Confusable words** — link words by shared root, spelling distance and
    sound distance; when two linked words are both struggling, put them in the
    same matching grid. Contrastive practice is what resolves interference.
    Spec'd in `docs/PLAN.md`.
-3. Verb conjugation (binyanim) — the big grammar piece.
-4. PWA manifest, service worker, push notifications.
-5. FSRS parameter optimizer (`fsrs-browser`, WASM) once there's history to
+5. Verb conjugation (binyanim) — the big grammar piece. The content has 14
+   verbs listed as present-tense participles with separate masculine and
+   feminine entries, which is how the source course teaches them.
+6. FSRS parameter optimizer (`fsrs-browser`, WASM) once there's history to
    train on.
-6. In-app editing writing back to markdown.
-7. Playwright end-to-end and an accessibility pass.
+7. In-app editing writing back to markdown.
+8. Playwright end-to-end and an accessibility pass.
+
+Worth a review pass, and flagged to the user: the part-of-speech and lesson
+groupings in `content/hebrew/` were assigned mechanically, not by them. Known
+soft spots are `ישן` filed as a verb though it also means "old", `טובה` folded
+in as a feminine form though it also means "a favour", and the thematic
+regrouping generally, which overrode the source course's own teaching order.
 
 Explicitly tabled: generated mnemonic suggestions ("make one for me"). The
 elaboration is where the encoding happens, so a finished mnemonic trades away
