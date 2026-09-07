@@ -216,7 +216,7 @@ describe('stable ids', () => {
 - מוֹרָה = teacher (f)
 `);
     expect(lexemes).toHaveLength(1);
-    expect(issues.some((i) => /key: f/.test(i.message))).toBe(true);
+    expect(issues.some((i) => /minimal pair/.test(i.message))).toBe(true);
   });
 
   it('leaves the un-keyed id untouched when a key is added to its twin', () => {
@@ -288,5 +288,100 @@ describe('HTML comments', () => {
     // Malformed, but it must not throw or silently lose everything above it.
     const { lexemes } = parse(`## Nouns\n- יֶלֶד = boy\n<!--\n- כֶּלֶב = dog\n`);
     expect(lexemes.map((l) => l.glosses[0])).toEqual(['boy']);
+  });
+});
+
+describe('markdown tables', () => {
+  const table = (rows: string) =>
+    `## Nouns\n\n| # | Hebrew | Pronunciation | English |\n|---|--------|---------------|---------|\n${rows}`;
+
+  it('reads a vocabulary table', () => {
+    const { lexemes, issues } = parse(table('| 1 | מים | mayim | water |\n| 2 | סוס | sus | horse, a horse |\n'));
+    expect(issues.filter((i) => i.severity === 'error')).toHaveLength(0);
+    expect(lexemes).toHaveLength(2);
+    expect(lexemes[0]).toMatchObject({ lemma: 'מים', glosses: ['water'], pos: 'noun' });
+    expect(lexemes[1]?.glosses).toEqual(['horse', 'a horse']);
+  });
+
+  it('takes the pronunciation column as an authored transliteration', () => {
+    // Authored beats derived: a course's own pronunciation is better evidence
+    // than anything generated from niqqud.
+    const { lexemes } = parse(table('| 1 | מים | mayim | water |\n'));
+    expect(lexemes[0]?.translit).toMatchObject({ value: 'mayim', provenance: 'authored' });
+  });
+
+  it('ignores an index column and any column it does not recognise', () => {
+    const src =
+      `## Nouns\n\n| # | Hebrew | English | My private notes |\n|---|---|---|---|\n| 7 | סוס | horse | remember this one |\n`;
+    const { lexemes, issues } = parse(src);
+    expect(lexemes).toHaveLength(1);
+    expect(issues.filter((i) => i.severity === 'error')).toHaveLength(0);
+  });
+
+  it('accepts optional pos, gender, root, key and group columns', () => {
+    const src =
+      `| Hebrew | English | Pos | Gender | Root | Group |\n|---|---|---|---|---|---|\n` +
+      `| כלב | dog | noun | m | כ-ל-ב | Animals |\n`;
+    const { lexemes } = parse(src);
+    expect(lexemes[0]).toMatchObject({ pos: 'noun', group: 'Animals' });
+    expect(lexemes[0]?.gender).toMatchObject({ value: 'm', provenance: 'authored' });
+    expect(lexemes[0]?.root).toMatchObject({ value: ['כ', 'ל', 'ב'], provenance: 'authored' });
+  });
+
+  it('lets a key column separate rows spelled the same without niqqud', () => {
+    const src =
+      `## Phrases\n\n| Hebrew | Pronunciation | English | Key |\n|---|---|---|---|\n` +
+      `| מה שלומך | ma shlomcha | how are you (m) | |\n` +
+      `| מה שלומך | ma shlomech | how are you (f) | f |\n`;
+    const { lexemes, issues } = parse(src);
+    expect(lexemes).toHaveLength(2);
+    expect(lexemes[0]?.id).not.toBe(lexemes[1]?.id);
+    expect(issues.filter((i) => i.severity === 'error')).toHaveLength(0);
+  });
+
+  it('reports a collision when no key distinguishes the rows', () => {
+    const { lexemes, issues } = parse(
+      table('| 1 | לך | lecha | to you (m) |\n| 2 | לך | lach | to you (f) |\n'),
+    );
+    expect(lexemes).toHaveLength(1);
+    expect(issues.some((i) => /Collides/.test(i.message))).toBe(true);
+  });
+
+  it('skips a table with no Hebrew column, and says so', () => {
+    const src = `## Nouns\n\n| Foo | Bar |\n|---|---|\n| a | b |\n`;
+    const { lexemes, issues } = parse(src);
+    expect(lexemes).toHaveLength(0);
+    expect(issues.some((i) => /no column named Hebrew/i.test(i.message))).toBe(true);
+  });
+
+  it('handles a table without leading and trailing pipes only when piped', () => {
+    // Rows must start with a pipe to be treated as table rows at all.
+    const { lexemes } = parse(`## Nouns\n\nHebrew | English\nמים | water\n`);
+    expect(lexemes).toHaveLength(0);
+  });
+
+  it('ends the table at the next heading and resumes normal parsing', () => {
+    const src =
+      `## Animals\n\n| Hebrew | English | Pos |\n|---|---|---|\n| כלב | dog | noun |\n\n` +
+      `## Adjectives\n\n- קָטָן = small\n`;
+    const { lexemes } = parse(src);
+    expect(lexemes.map((l) => l.group)).toEqual(['Animals', 'Adjectives']);
+    expect(lexemes[1]?.pos).toBe('adj');
+  });
+
+  it('lets bullets and tables coexist in one file', () => {
+    const src =
+      `## Nouns\n\n- יֶלֶד = boy\n\n| Hebrew | English |\n|---|---|\n| כלב | dog |\n`;
+    const { lexemes } = parse(src);
+    expect(lexemes.map((l) => l.glosses[0])).toEqual(['boy', 'dog']);
+  });
+
+  it('never throws on a malformed table', () => {
+    fc.assert(
+      fc.property(fc.array(fc.fullUnicodeString(), { maxLength: 6 }), (cells) => {
+        const src = `## Nouns\n| Hebrew | English |\n|---|---|\n| ${cells.join(' | ')} |\n`;
+        expect(() => parseContentFile(src, FILE)).not.toThrow();
+      }),
+    );
   });
 });

@@ -77,6 +77,82 @@ function parsePos(heading: string): Pos | null {
   return POS_ALIASES[heading.trim().toLowerCase()] ?? null;
 }
 
+// --- Markdown tables -------------------------------------------------------
+
+/**
+ * Column header aliases.
+ *
+ * Vocabulary lists arrive as tables far more often than as bullet lists -
+ * that's what a spreadsheet, a course export, or a wiki page gives you. Rather
+ * than make people reformat hundreds of rows by hand, the parser reads the
+ * table and maps its headers onto the same fields the bullet syntax uses.
+ *
+ * Unrecognised columns are ignored rather than rejected, so an index column or
+ * a private "notes to self" column costs nothing.
+ */
+const COLUMN_ALIASES: Readonly<Record<string, string>> = {
+  hebrew: 'hebrew', word: 'hebrew', he: 'hebrew', term: 'hebrew',
+  english: 'english', meaning: 'english', translation: 'english', gloss: 'english',
+  pronunciation: 'tr', transliteration: 'tr', translit: 'tr', tr: 'tr', sound: 'tr',
+  pos: 'pos', type: 'pos', 'part of speech': 'pos', class: 'pos',
+  gender: 'gender', g: 'gender',
+  number: 'number',
+  root: 'root',
+  group: 'group', lesson: 'group', topic: 'group', category: 'group', unit: 'group',
+  key: 'key',
+  // Authored inflections beat generated ones, so a table can carry them.
+  ms: 'ms', fs: 'fs', mp: 'mp', fp: 'fp',
+  feminine: 'fs', 'masc pl': 'mp', 'fem pl': 'fp',
+  note: 'note', notes: 'note', comment: 'note',
+  example: 'ex', ex: 'ex', sentence: 'ex',
+  tags: 'tags',
+};
+
+/** Split `| a | b |` into its cells, dropping the outer pipes. */
+function splitRow(line: string): string[] {
+  let body = line.trim();
+  if (body.startsWith('|')) body = body.slice(1);
+  if (body.endsWith('|')) body = body.slice(0, -1);
+  return body.split('|').map((c) => c.trim());
+}
+
+/** The `|---|:--:|` line under a table header. */
+function isSeparatorRow(cells: readonly string[]): boolean {
+  return cells.length > 0 && cells.every((c) => /^:?-{2,}:?$/u.test(c));
+}
+
+/** Map header cells to field names; null when no Hebrew column is present. */
+function mapColumns(cells: readonly string[]): (string | null)[] | null {
+  const mapped = cells.map((c) => COLUMN_ALIASES[c.trim().toLowerCase()] ?? null);
+  return mapped.includes('hebrew') ? mapped : null;
+}
+
+/** Turn one table row into the same shape a bullet line produces. */
+function entryFromRow(cells: readonly string[], columns: readonly (string | null)[]): RawEntry | null {
+  const fields = new Map<string, string[]>();
+  let lemma = '';
+  let glossText = '';
+
+  for (let i = 0; i < cells.length; i++) {
+    const field = columns[i];
+    const value = (cells[i] ?? '').trim();
+    if (!field || value === '') continue;
+
+    if (field === 'hebrew') lemma = value;
+    else if (field === 'english') glossText = value;
+    else {
+      const existing = fields.get(field);
+      if (existing) existing.push(value);
+      else fields.set(field, [value]);
+    }
+  }
+
+  if (lemma === '' || glossText === '') return null;
+
+  const glosses = glossText.split(',').map((g) => g.trim()).filter(Boolean);
+  return { lemma, glosses, fields };
+}
+
 // --- Issues ----------------------------------------------------------------
 
 export type IssueSeverity = 'error' | 'warning' | 'info';
@@ -224,6 +300,8 @@ export function parseContentFile(source: string, filePath: string): ParseResult 
 
   let currentPos: Pos | null = fm.pos;
   let currentGroup = fm.title === '' ? 'Words' : fm.title;
+  // Set while inside a table whose header named a Hebrew column.
+  let tableColumns: (string | null)[] | null = null;
   // HTML comments span lines, and authors put worked examples inside them.
   // Without tracking the close tag those examples get parsed as real entries.
   let inComment = false;
@@ -242,6 +320,32 @@ export function parseContentFile(source: string, filePath: string): ParseResult 
       continue;
     }
     if (line === '') continue;
+
+    if (line.startsWith('|')) {
+      const cells = splitRow(line);
+      if (isSeparatorRow(cells)) continue;
+
+      if (tableColumns === null) {
+        tableColumns = mapColumns(cells);
+        if (tableColumns === null) {
+          issues.push({
+            severity: 'warning',
+            file: filePath,
+            line: lineNo,
+            message:
+              'Table skipped: no column named Hebrew (or Word / Term). Rename the header to read it.',
+          });
+        }
+        continue;
+      }
+
+      const row = entryFromRow(cells, tableColumns);
+      if (!row) continue; // blank or padding row
+      addEntry(row, lineNo);
+      continue;
+    }
+    // Any non-table line ends the table.
+    tableColumns = null;
 
     const heading = /^#{1,6}\s+(.*)$/u.exec(line);
     if (heading) {
@@ -267,6 +371,17 @@ export function parseContentFile(source: string, filePath: string): ParseResult 
       continue;
     }
 
+    addEntry(entry, lineNo);
+  }
+
+  return { lexemes, issues };
+
+  /**
+   * Validate one entry and add it, whether it came from a bullet line or a
+   * table row. Both syntaxes must behave identically - same checks, same
+   * messages, same identity rules - so they share this.
+   */
+  function addEntry(entry: RawEntry, lineNo: number): void {
     const posField = entry.fields.get('pos')?.[0];
     const pos: Pos | null = posField ? parsePos(posField) : currentPos;
     if (!pos) {
@@ -276,9 +391,9 @@ export function parseContentFile(source: string, filePath: string): ParseResult 
         line: lineNo,
         lemma: entry.lemma,
         message:
-          'No part of speech. Add a `## Nouns` style heading above, or `; pos: noun` on the line.',
+          'No part of speech. Add a `## Nouns` style heading above, a `pos:` column, or `; pos: noun` on the line.',
       });
-      continue;
+      return;
     }
 
     if (!hasHebrew(entry.lemma)) {
@@ -287,9 +402,9 @@ export function parseContentFile(source: string, filePath: string): ParseResult 
         file: filePath,
         line: lineNo,
         lemma: entry.lemma,
-        message: 'The left side of `=` contains no Hebrew letters.',
+        message: 'No Hebrew letters in the word column.',
       });
-      continue;
+      return;
     }
 
     const id = lexemeId(entry.lemma, pos, entry.fields.get('key')?.[0] ?? '');
@@ -302,16 +417,16 @@ export function parseContentFile(source: string, filePath: string): ParseResult 
         lemma: entry.lemma,
         message:
           `Collides with the entry on line ${prior} (they are spelled the same without niqqud). ` +
-          'If they are the same word, merge the glosses; if they are a minimal pair, add `; key: f` to this one.',
+          'If they are the same word, merge the glosses; if they are a minimal pair, add a `key` of `f` to this one.',
       });
-      continue;
+      return;
     }
     seen.set(id, lineNo);
 
-    lexemes.push(buildLexeme(entry, pos, id, fm, currentGroup, filePath, lineNo, issues));
+    // A `group` column overrides the heading, so one table can carry lessons.
+    const group = entry.fields.get('group')?.[0] ?? currentGroup;
+    lexemes.push(buildLexeme(entry, pos, id, fm, group, filePath, lineNo, issues));
   }
-
-  return { lexemes, issues };
 }
 
 function buildLexeme(
