@@ -9,7 +9,7 @@
 
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useApp } from './store.js';
 import { db, exportBackup } from './db.js';
@@ -273,7 +273,14 @@ describe('the path', () => {
     await user.click(screen.getByRole('button', { name: /show answer/i }));
     await user.click(screen.getByText('Good'));
 
-    expect(useApp.getState().cards.get(cardId)!.fsrs.state).not.toBe(0);
+    // SessionScreen fires `void answer(...)` rather than awaiting it, so the
+    // click resolves before the store update (and its DB write) necessarily
+    // has - asserting on the store synchronously right after is racy no
+    // matter how carefully the clicks leading up to it are sequenced.
+    // waitFor is the correct tool for "this happens soon", not another await.
+    await waitFor(() => {
+      expect(useApp.getState().cards.get(cardId)!.fsrs.state).not.toBe(0);
+    });
     const logs = await db.logs.where('cardId').equals(cardId).toArray();
     expect(logs[0]?.countsForScheduling).toBe(true);
   });
@@ -791,7 +798,12 @@ describe('rendering', () => {
     }
 
     await user.click(screen.getByText('Good'));
-    expect(await db.logs.count()).toBe(1);
+    // The click resolves before the fire-and-forget `answer()` call it
+    // triggers necessarily has, so this DB read can't just be a bare await -
+    // see the fuller explanation on the same pattern above.
+    await waitFor(async () => {
+      expect(await db.logs.count()).toBe(1);
+    });
   });
 
   it('renders Hebrew right-to-left and marks its language', async () => {
