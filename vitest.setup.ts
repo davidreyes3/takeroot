@@ -31,3 +31,35 @@ if (typeof window !== 'undefined' && !window.localStorage) {
     configurable: true,
   });
 }
+
+/**
+ * Provide `Blob.prototype.text` and `URL.createObjectURL`/`revokeObjectURL`
+ * when the DOM environment lacks them.
+ *
+ * This project's jsdom build supports `File`/`Blob`/`FileReader` but not
+ * `Blob.prototype.text` or the URL object-URL methods, all of which the
+ * backup export/import flow uses. Same rule as localStorage above: give the
+ * test environment the API a browser actually has, rather than writing the
+ * component around a test-only gap.
+ */
+if (typeof Blob !== 'undefined' && !Blob.prototype.text) {
+  Blob.prototype.text = function (this: Blob): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(this);
+    });
+  };
+}
+
+if (typeof window !== 'undefined' && !window.URL.createObjectURL) {
+  Object.defineProperty(window.URL, 'createObjectURL', {
+    value: () => 'blob:mock-url',
+    configurable: true,
+  });
+  Object.defineProperty(window.URL, 'revokeObjectURL', {
+    value: () => {},
+    configurable: true,
+  });
+}

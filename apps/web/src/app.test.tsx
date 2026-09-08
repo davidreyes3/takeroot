@@ -8,11 +8,11 @@
  */
 
 import 'fake-indexeddb/auto';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useApp } from './store.js';
-import { db } from './db.js';
+import { db, exportBackup } from './db.js';
 import { contentFiles } from './content.js';
 import { App } from './App.js';
 import { buildPath } from './screens/PathScreen.js';
@@ -272,6 +272,106 @@ describe('mnemonics library', () => {
     const katan = useApp.getState().lexemes.find((l) => l.lemmaBare === 'קטן')!;
     expect(await db.mnemonics.get(katan.id)).toMatchObject({ keyword: 'cotton' });
     expect(await screen.findByRole('button', { name: /cotton/i })).toBeInTheDocument();
+  });
+});
+
+describe('backup', () => {
+  it('exports every table into one JSON file', async () => {
+    const user = userEvent.setup();
+    await useApp.getState().init();
+    await useApp.getState().startSession();
+    const cardId = useApp.getState().plan!.items[0]!.cardId;
+    await useApp.getState().answer({ cardId, rating: 3, elapsedMs: 1200, exercise: 'flashcard' });
+    useApp.getState().endSession();
+
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: 'Settings' }));
+
+    let capturedBlob: Blob | null = null;
+    const createSpy = vi
+      .spyOn(URL, 'createObjectURL')
+      .mockImplementation((blob) => {
+        capturedBlob = blob as Blob;
+        return 'blob:mock';
+      });
+    const revokeSpy = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+
+    await user.click(await screen.findByRole('button', { name: 'Download backup' }));
+
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    expect(revokeSpy).toHaveBeenCalledTimes(1);
+    const parsed = JSON.parse(await capturedBlob!.text());
+    expect(parsed.version).toBe(1);
+    expect(
+      parsed.cards.some((c: { id: string; fsrs: { reps: number } }) => c.id === cardId && c.fsrs.reps === 1),
+    ).toBe(true);
+
+    vi.restoreAllMocks();
+  });
+
+  it('imports a backup, replacing whatever was on this device', async () => {
+    const user = userEvent.setup();
+    await useApp.getState().init();
+    const katan = useApp.getState().lexemes.find((l) => l.lemmaBare === 'קטן')!;
+    const cardId = `${katan.id}:recall_he_en`;
+    await useApp.getState().answer({ cardId, rating: 3, elapsedMs: 1200, exercise: 'flashcard' });
+
+    const backupJson = await exportBackup();
+
+    // Diverge local state after the backup was taken, so import has
+    // something real to overwrite.
+    await useApp.getState().answer({ cardId, rating: 1, elapsedMs: 900, exercise: 'flashcard' });
+    const beforeImport = useApp.getState().cards.get(cardId)!.fsrs;
+
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: 'Settings' }));
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const file = new File([backupJson], 'backup.json', { type: 'application/json' });
+    await user.upload(screen.getByLabelText('Backup file'), file);
+
+    await screen.findByText('Backup imported.');
+
+    const restored = useApp.getState().cards.get(cardId)!.fsrs;
+    expect(restored.reps).toBe(1); // the pre-divergence state captured in the backup
+    expect(restored).not.toEqual(beforeImport);
+    expect(await db.logs.where('cardId').equals(cardId).count()).toBe(1);
+
+    vi.restoreAllMocks();
+  });
+
+  it('does nothing when the import is not confirmed', async () => {
+    const user = userEvent.setup();
+    await useApp.getState().init();
+    const countBefore = await db.cards.count();
+
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: 'Settings' }));
+
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const file = new File([await exportBackup()], 'backup.json', { type: 'application/json' });
+    await user.upload(screen.getByLabelText('Backup file'), file);
+
+    expect(await db.cards.count()).toBe(countBefore);
+    expect(screen.queryByText('Backup imported.')).toBeNull();
+
+    vi.restoreAllMocks();
+  });
+
+  it('reports a failure instead of crashing on a bad file', async () => {
+    const user = userEvent.setup();
+    await useApp.getState().init();
+
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: 'Settings' }));
+
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const file = new File(['not json'], 'backup.json', { type: 'application/json' });
+    await user.upload(screen.getByLabelText('Backup file'), file);
+
+    expect(await screen.findByText(/Import failed/i)).toBeInTheDocument();
+
+    vi.restoreAllMocks();
   });
 });
 

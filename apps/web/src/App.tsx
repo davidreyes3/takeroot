@@ -6,9 +6,10 @@ import { recentLogsFor } from './db.js';
 import { PathScreen } from './screens/PathScreen.js';
 import { PracticeScreen } from './screens/PracticeScreen.js';
 import { MnemonicsScreen } from './screens/MnemonicsScreen.js';
+import { SettingsScreen } from './screens/SettingsScreen.js';
 import { SessionScreen } from './screens/SessionScreen.js';
 
-type View = 'path' | 'practice' | 'mnemonics';
+type View = 'path' | 'practice' | 'mnemonics' | 'settings';
 
 export function App() {
   const { ready, lexemes, cards, plan, cursor, issues, init, startSession, endSession } = useApp();
@@ -124,6 +125,9 @@ export function App() {
         <button className="tab" data-active={view === 'mnemonics'} onClick={() => setView('mnemonics')}>
           Mnemonics
         </button>
+        <button className="tab" data-active={view === 'settings'} onClick={() => setView('settings')}>
+          Settings
+        </button>
       </nav>
 
       {view === 'path' && <PathScreen lexemes={lexemes} cards={cards} unitTitles={unitTitles} />}
@@ -131,6 +135,7 @@ export function App() {
         <PracticeScreen lexemes={lexemes} cards={cards} unitTitles={unitTitles} />
       )}
       {view === 'mnemonics' && <MnemonicsScreen lexemes={lexemes} unitTitles={unitTitles} />}
+      {view === 'settings' && <SettingsScreen />}
 
       {view === 'path' && (
         <div className="study-bar">
