@@ -123,13 +123,15 @@ describe('buildPath', () => {
     expect(nodes.map((n) => n.title)).toEqual(['Greetings', 'Pronouns', 'Colours']);
   });
 
-  it('opens the first node and locks the rest', () => {
+  it('opens every node, regardless of mastery elsewhere on the path', () => {
+    // Nodes used to unlock only once the one before hit 60% mastery. That
+    // gated the whole course behind a single stubborn word with no way to
+    // jump ahead (or back) on purpose - removed deliberately, see buildPath.
     const nodes = buildPath(words, cardsFor([]));
-    expect(nodes[0]?.status).toBe('available');
-    expect(nodes[1]?.status).toBe('locked');
+    expect(nodes.every((n) => n.status === 'available' || n.status === 'complete')).toBe(true);
   });
 
-  it('unlocks the next node at 60% mastery, not at perfection', () => {
+  it('still reports partial mastery even though it no longer gates anything', () => {
     const fourOfSix = group('Greetings', 6).slice(0, 4).map((w) => w.id);
     const nodes = buildPath(words, cardsFor(fourOfSix));
     expect(nodes[0]?.mastery).toBeCloseTo(4 / 6);

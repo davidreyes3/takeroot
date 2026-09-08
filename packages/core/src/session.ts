@@ -14,15 +14,30 @@
  *   3. reviews   the rest of the backlog.
  *   4. new       introductions last, and only if the backlog is under control.
  *
- * Every stage is capped, so the returned plan is bounded regardless of how
- * large the collection grows.
+ * Every stage is capped, and the session as a whole is capped again on top of
+ * that, so the returned plan is bounded regardless of how large the collection
+ * grows - and short enough to actually finish in one sitting.
+ *
+ * A session can also be narrowed to a set of templates or a set of words. That
+ * is what makes a reading-only session, a writing-practice session and a
+ * single-lesson practice run all the same code path rather than three queues
+ * that drift apart.
  */
 
 import { assessLeech, buildGymPlan, DEFAULT_LEECH_POLICY, type GymPlan, type LeechPolicy } from './leech.js';
 import { isUnlocked } from './cards.js';
-import type { Card, ExerciseKind, Lexeme, ReviewLog } from './types.js';
+import type { Card, CardTemplate, ExerciseKind, Lexeme, ReviewLog } from './types.js';
 
 export interface SessionConfig {
+  /**
+   * Hard ceiling on the whole session, every stage included.
+   *
+   * The per-stage caps below bound each queue independently, which is not the
+   * same thing: a full backlog plus a full new batch still adds up to a sitting
+   * long enough that you stop opening the app. This is the number that decides
+   * how long one session actually is, and it is the one the learner controls.
+   */
+  maxItems: number;
   maxReviews: number;
   maxNew: number;
   maxGym: number;
@@ -35,9 +50,10 @@ export interface SessionConfig {
 }
 
 export const DEFAULT_SESSION_CONFIG: SessionConfig = {
+  maxItems: 12,
   maxReviews: 60,
-  maxNew: 8,
-  maxGym: 3,
+  maxNew: 5,
+  maxGym: 2,
   newIntroBacklogLimit: 80,
   warmUpCount: 3,
 };
@@ -59,6 +75,14 @@ export interface SessionStats {
   leechCount: number;
   /** True when new words were withheld because the backlog is too big. */
   newHeldBack: boolean;
+  /**
+   * Due cards this session did not have room for.
+   *
+   * They are not lost - they stay due and lead the next session. Surfacing the
+   * number keeps the session cap honest: a short session is a choice about one
+   * sitting, not a claim that the backlog is smaller than it is.
+   */
+  dueRemaining: number;
 }
 
 export interface SessionPlan {
@@ -74,6 +98,30 @@ export interface BuildSessionInput {
   now: number;
   config?: Partial<SessionConfig>;
   policy?: LeechPolicy;
+  /**
+   * Which templates this session is allowed to ask. Writing practice passes
+   * `['type_he']`; leave it unset for everything.
+   *
+   * This narrows the queue only. Cards left out are still *studiable* in
+   * general, so they still gate their tier - which is what stops writing
+   * practice from asking you to spell a word you cannot yet read.
+   */
+  templates?: readonly CardTemplate[];
+  /**
+   * Templates switched off entirely, not merely absent from this queue.
+   *
+   * Turning typing off passes `['type_he']` here, and the difference from
+   * `templates` matters: a disabled card is invisible to tier gating too.
+   * `type_he` is tier 2, so a card that can never be studied would otherwise
+   * sit in the prerequisite set forever and lock the tier-3 agreement cards
+   * away permanently.
+   */
+  disabledTemplates?: readonly CardTemplate[];
+  /**
+   * Restrict the session to these words. This is how practising one lesson
+   * stays inside that lesson instead of turning into a general review.
+   */
+  lexemeIds?: readonly string[];
 }
 
 /**
@@ -121,13 +169,36 @@ export function buildSession(input: BuildSessionInput): SessionPlan {
   const { cards, lexemes, logsByCard, now } = input;
 
   const lexemeById = new Map(lexemes.map((l) => [l.id, l]));
-  const active = cards.filter((c) => !c.suspended && lexemeById.has(c.lexemeId));
+
+  // Two different worlds, and keeping them apart is the whole subtlety here.
+  //
+  // `active` is every card that still exists as far as this learner is
+  // concerned. It is what tier gating and the gym's pools reason over, so a
+  // card left out of today's queue still counts as a prerequisite.
+  //
+  // `queueable` is the subset this particular session may actually ask.
+  const disabled = new Set(input.disabledTemplates ?? []);
+  const askable = input.templates ? new Set(input.templates) : null;
+  const allowedLexemes = input.lexemeIds ? new Set(input.lexemeIds) : null;
+
+  const active = cards.filter(
+    (c) =>
+      !c.suspended &&
+      lexemeById.has(c.lexemeId) &&
+      !disabled.has(c.template) &&
+      (!allowedLexemes || allowedLexemes.has(c.lexemeId)),
+  );
+  const queueable = askable ? active.filter((c) => askable.has(c.template)) : active;
+
+  // Typing is the gym's default closing test. A learner who has switched
+  // typing off cannot be asked to close a gym that way.
+  const typedFinalTest = !disabled.has('type_he');
 
   const due: Card[] = [];
   const leeches: Card[] = [];
   const fresh: Card[] = [];
 
-  for (const card of active) {
+  for (const card of queueable) {
     if (card.fsrs.state === 0) {
       fresh.push(card);
       continue;
@@ -167,10 +238,25 @@ export function buildSession(input: BuildSessionInput): SessionPlan {
     return true;
   };
 
+  // How the single session cap is shared out.
+  //
+  // Applying it as a plain running total would let a backlog swallow every
+  // slot, and a learner who is permanently a little behind would never meet
+  // another new word - the exact spiral that makes people give up. So the new
+  // words are budgeted for first, and the earlier stages get whatever is left.
+  const backlog = due.length + leeches.length;
+  const newHeldBack = backlog > config.newIntroBacklogLimit;
+  const introducible = newHeldBack
+    ? []
+    : dedupeByLexeme(fresh.filter((c) => isUnlocked(c, active)));
+  const newTarget = Math.min(config.maxNew, introducible.length);
+  const backlogBudget = Math.max(0, config.maxItems - newTarget);
+  const roomForBacklog = () => items.length < backlogBudget;
+
   // --- 1. warm-up
   let dueIndex = 0;
   let warmedUp = 0;
-  while (warmedUp < config.warmUpCount && dueIndex < due.length) {
+  while (warmedUp < config.warmUpCount && dueIndex < due.length && roomForBacklog()) {
     if (take(due[dueIndex] as Card, 'warmup')) warmedUp++;
     dueIndex++;
   }
@@ -204,7 +290,7 @@ export function buildSession(input: BuildSessionInput): SessionPlan {
 
   let gymCount = 0;
   for (const card of leeches) {
-    if (gymCount >= config.maxGym) break;
+    if (gymCount >= config.maxGym || !roomForBacklog()) break;
     const lexeme = lexemeById.get(card.lexemeId);
     if (!lexeme) continue;
     if (usedLexemes.has(card.lexemeId)) continue;
@@ -244,6 +330,7 @@ export function buildSession(input: BuildSessionInput): SessionPlan {
       // Matching wants contrast, so a known word is a perfectly good
       // distractor there - it is discrimination being tested, not recall.
       matchingPoolIds: allOthers.slice(0, 4).map((c) => c.id),
+      typedFinalTest,
     });
     if (take(card, 'gym', plan)) gymCount++;
   }
@@ -251,28 +338,48 @@ export function buildSession(input: BuildSessionInput): SessionPlan {
   // --- 3. the rest of the backlog
   let reviewCount = warmedUp;
   for (; dueIndex < due.length && reviewCount < config.maxReviews; dueIndex++) {
+    if (!roomForBacklog()) break;
     if (take(due[dueIndex] as Card, 'review')) reviewCount++;
   }
 
   // --- 4. new introductions
-  const backlog = due.length + leeches.length;
-  const newHeldBack = backlog > config.newIntroBacklogLimit;
+  //
+  // These fill up to the full cap rather than only to their own budget: if the
+  // backlog came in short, the spare room is better spent moving forward.
   let newCount = 0;
-  if (!newHeldBack) {
-    for (const card of fresh) {
-      if (newCount >= config.maxNew) break;
-      if (!isUnlocked(card, active)) continue;
-      if (take(card, 'new')) newCount++;
-    }
+  for (const card of introducible) {
+    if (newCount >= config.maxNew || items.length >= config.maxItems) break;
+    if (take(card, 'new')) newCount++;
   }
+
+  const backlogShown = items.filter((i) => i.kind !== 'new').length;
 
   return {
     items,
     stats: {
-      dueCount: due.length + leeches.length,
+      dueCount: backlog,
       newAvailable: fresh.length,
       leechCount: leeches.length,
       newHeldBack,
+      dueRemaining: Math.max(0, backlog - backlogShown),
     },
   };
+}
+
+/**
+ * One card per word, keeping the first of each.
+ *
+ * The new-word budget has to be counted in words, not cards, because `take`
+ * refuses a second card of a word already in the session - so counting cards
+ * would reserve slots that can never be filled.
+ */
+function dedupeByLexeme(cards: readonly Card[]): Card[] {
+  const seen = new Set<string>();
+  const out: Card[] = [];
+  for (const card of cards) {
+    if (seen.has(card.lexemeId)) continue;
+    seen.add(card.lexemeId);
+    out.push(card);
+  }
+  return out;
 }

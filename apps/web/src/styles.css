@@ -126,6 +126,19 @@ input { font: inherit; }
 
 .tab[data-active="true"] { color: var(--text); border-bottom-color: var(--accent); }
 
+/* A second row of tabs inside a screen, e.g. Extras. Lighter than the main
+   nav so it reads as a choice within the section, not a change of section. */
+.tabs.sub { margin-bottom: 16px; border-bottom: none; gap: 6px; }
+.tabs.sub .tab { padding: 6px 10px; font-size: 13px; }
+
+/* A pill used as a control rather than a readout. */
+.pill.pressable { cursor: pointer; font-variant-numeric: tabular-nums; }
+.pill.pressable[data-active="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--text);
+}
+
 /* --- path --------------------------------------------------------------- */
 
 .path { display: flex; flex-direction: column; gap: 0; position: relative; }
@@ -366,16 +379,37 @@ input { font: inherit; }
 .field { width: 100%; display: flex; flex-direction: column; gap: 6px; text-align: left; }
 .field label { font-size: 13px; color: var(--text-dim); font-weight: 500; }
 
-.field input {
+.field input, .field select {
   padding: 11px 13px;
   border-radius: 10px;
   border: 1.5px solid var(--border);
   background: var(--surface-2);
   color: var(--text);
   outline: none;
+  font: inherit;
 }
 
-.field input:focus { border-color: var(--accent); }
+.field input:focus, .field select:focus { border-color: var(--accent); }
+
+/* --- word list ------------------------------------------------------------ */
+
+.summary-row input[type="checkbox"] { accent-color: var(--accent); width: 18px; height: 18px; flex: none; }
+
+/*
+ * Pinned to the top of the viewport once scrolled there, so a shrinking
+ * result list beneath it (typing narrows the word list a lot) can't push it
+ * around or out from under an on-screen keyboard - see WordListManager.tsx.
+ * The background stops the list scrolling underneath it from showing through.
+ */
+.sticky-search {
+  position: sticky;
+  top: env(safe-area-inset-top);
+  z-index: 5;
+  background: var(--bg);
+  padding: 10px 0;
+  margin: 0 -20px;
+  padding-inline: 20px;
+}
 
 /* --- agreement table ---------------------------------------------------- */
 

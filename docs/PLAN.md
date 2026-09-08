@@ -311,10 +311,14 @@ absorbed into its neighbour, and any leftover tail is re-split evenly — so no
 lesson can be finished in two answers. Mastery rings are drawn with a conic
 gradient, no SVG.
 
-A node unlocks at **60% mastery of the previous one**, not 100%. Requiring
+Every node is open, and tapping one studies just that lesson (`startSession({
+lexemeIds })`). This reverses an earlier rule that unlocked a node only at
+**60% mastery of the previous one** — reasoned, at the time, as: requiring
 perfection would gate the whole course behind whichever single word you find
-impossible — and that word is exactly what the gym is for. It shouldn't stand
-between you and new material.
+impossible, and that word is exactly what the gym is for. True as far as it
+went, but it traded away the ability to jump to a lesson on purpose, which
+turned out to matter more. The mastery ring is unchanged; it just no longer
+gates anything.
 
 Two tracks are planned: **vocabulary** (word → meaning) and **grammar**
 (pattern → produce the form). Tier-3 agreement cards are the seed of the second.

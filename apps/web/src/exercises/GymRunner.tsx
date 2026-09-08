@@ -14,8 +14,10 @@ export interface GymRunnerProps {
   desiredRetention: number;
   /** Drill answers: logged, but never allowed to move the schedule. */
   onDrillAnswer: (cardId: string, rating: Rating, elapsedMs: number) => void;
-  /** The one answer that counts. */
+  /** The one answer that counts, when the closing test is typed. */
   onFinalAnswer: (cardId: string, correct: boolean, elapsedMs: number, usedHint: boolean) => void;
+  /** The one answer that counts, when typing is off and it is self-graded. */
+  onFinalRating: (cardId: string, rating: Rating, elapsedMs: number) => void;
   onSaveMnemonic: (lexemeId: string, keyword: string, image: string) => void;
   onComplete: () => void;
 }
@@ -164,6 +166,26 @@ export function GymRunner(props: GymRunnerProps) {
   if (!finalCard) {
     onComplete();
     return null;
+  }
+
+  // With typing switched off the gym still has to close on something that
+  // reschedules the card, or the word never graduates out of leech status.
+  // It becomes a self-graded recall of the same card instead.
+  if (step.exercise === 'flashcard') {
+    return (
+      <div>
+        {progress}
+        <Flashcard
+          card={finalCard}
+          lexeme={targetLexeme}
+          desiredRetention={desiredRetention}
+          onAnswer={(rating, elapsedMs) => {
+            props.onFinalRating(finalCard.id, rating, elapsedMs);
+            onComplete();
+          }}
+        />
+      </div>
+    );
   }
 
   return (

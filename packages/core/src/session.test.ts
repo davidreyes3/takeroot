@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { buildSession, DEFAULT_SESSION_CONFIG } from './session.js';
-import { cardsForLexeme, templatesFor, isUnlocked, syncCards, CARD_TIER } from './cards.js';
+import {
+  cardsForLexeme,
+  templatesFor,
+  isUnlocked,
+  syncCards,
+  CARD_TIER,
+} from './cards.js';
 import { newCard, createScheduler, reviewCard } from './scheduler.js';
 import type { Card, Lexeme, ReviewLog } from './types.js';
 
@@ -542,5 +548,155 @@ describe('the gym drills a word from both directions', () => {
     for (const id of drill.sequence) {
       expect(id.startsWith('lx_solid')).toBe(false);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Session size, template filtering and per-lesson practice.
+// ---------------------------------------------------------------------------
+
+describe('the whole session is capped, not just each stage', () => {
+  it('never returns more items than maxItems, however big the backlog', () => {
+    const lexemes = Array.from({ length: 500 }, (_, i) => lexeme(`lx_${i}`));
+    const cards = lexemes.map((l, i) => dueCard(l.id, T0 - (i + 1) * 1000));
+    const plan = buildSession({ cards, lexemes, logsByCard: noLogs, now: T0 });
+    expect(plan.items.length).toBeLessThanOrEqual(DEFAULT_SESSION_CONFIG.maxItems);
+  });
+
+  it('still introduces new words when the backlog would otherwise fill the session', () => {
+    // Regression: a global cap applied naively lets reviews eat every slot, so
+    // a learner with a steady backlog never meets another new word.
+    const lexemes = Array.from({ length: 60 }, (_, i) => lexeme(`lx_${i}`));
+    const cards = [
+      ...lexemes.slice(0, 40).map((l, i) => dueCard(l.id, T0 - (i + 1) * 1000)),
+      ...lexemes.slice(40).map((l) => newCard(l.id, 'recall_he_en', T0)),
+    ];
+    const plan = buildSession({ cards, lexemes, logsByCard: noLogs, now: T0 });
+    expect(plan.items.filter((i) => i.kind === 'new').length).toBeGreaterThan(0);
+    expect(plan.items.length).toBeLessThanOrEqual(DEFAULT_SESSION_CONFIG.maxItems);
+  });
+
+  it('reports how much of the backlog the session left behind', () => {
+    const lexemes = Array.from({ length: 40 }, (_, i) => lexeme(`lx_${i}`));
+    const cards = lexemes.map((l, i) => dueCard(l.id, T0 - (i + 1) * 1000));
+    const plan = buildSession({ cards, lexemes, logsByCard: noLogs, now: T0 });
+    const shown = plan.items.filter((i) => i.kind !== 'new').length;
+    expect(plan.stats.dueRemaining).toBe(40 - shown);
+  });
+});
+
+describe('restricting a session to certain templates', () => {
+  it('leaves typing cards out entirely when they are not allowed', () => {
+    const lexemes = [lexeme('lx_1')];
+    const base = newCard('lx_1', 'type_he', T0);
+    const cards = [
+      dueCard('lx_1', T0 - DAY),
+      { ...base, fsrs: { ...base.fsrs, state: 2 as const, due: T0 - DAY } },
+    ];
+    const plan = buildSession({
+      cards,
+      lexemes,
+      logsByCard: noLogs,
+      now: T0,
+      disabledTemplates: ['type_he'],
+    });
+    expect(plan.items.every((i) => !i.cardId.endsWith('type_he'))).toBe(true);
+  });
+
+  it('does not let a disallowed card hold back the tier above it', () => {
+    // type_he and recall_en_he are both tier 2. With typing switched off the
+    // typing card will never graduate, so leaving it in the prerequisite set
+    // would lock the agreement cards away forever.
+    const lx = lexeme('lx_1');
+    const graduated = (t: 'recall_he_en' | 'recall_en_he' | 'type_he') => {
+      const c = newCard('lx_1', t, T0);
+      return { ...c, fsrs: { ...c.fsrs, state: 2 as const, due: T0 + DAY } };
+    };
+    const cards = [
+      graduated('recall_he_en'),
+      graduated('recall_en_he'),
+      newCard('lx_1', 'type_he', T0), // never studied
+      newCard('lx_1', 'form_fs', T0),
+    ];
+    const plan = buildSession({
+      cards,
+      lexemes: [lx],
+      logsByCard: noLogs,
+      now: T0,
+      disabledTemplates: ['type_he'],
+    });
+    expect(plan.items.some((i) => i.cardId === 'lx_1:form_fs')).toBe(true);
+  });
+
+  it('runs a typing-only session, which is what writing practice is', () => {
+    // The typing card is tier 2, so it needs its reading sibling graduated
+    // before it can be introduced at all.
+    const lexemes = Array.from({ length: 4 }, (_, i) => lexeme(`lx_${i}`));
+    const cards = lexemes.flatMap((l) =>
+      cardsForLexeme(l, T0).map((c) =>
+        c.template === 'recall_he_en'
+          ? { ...c, fsrs: { ...c.fsrs, state: 2 as const, due: T0 + DAY } }
+          : c,
+      ),
+    );
+    const plan = buildSession({
+      cards,
+      lexemes,
+      logsByCard: noLogs,
+      now: T0,
+      templates: ['type_he'],
+    });
+    expect(plan.items.length).toBeGreaterThan(0);
+    expect(plan.items.every((i) => i.exercise === 'type')).toBe(true);
+  });
+
+  it('will not ask you to spell a word you cannot yet read', () => {
+    // Narrowing the queue to typing must not narrow the tier gate with it:
+    // the reading card is still the prerequisite even though this session
+    // will never show it.
+    const lexemes = Array.from({ length: 4 }, (_, i) => lexeme(`lx_${i}`));
+    const cards = lexemes.flatMap((l) => cardsForLexeme(l, T0));
+    const plan = buildSession({
+      cards,
+      lexemes,
+      logsByCard: noLogs,
+      now: T0,
+      templates: ['type_he'],
+    });
+    expect(plan.items).toHaveLength(0);
+  });
+});
+
+describe('practising one lesson', () => {
+  it('only ever queues words from that lesson', () => {
+    const lexemes = Array.from({ length: 20 }, (_, i) => lexeme(`lx_${i}`));
+    const cards = lexemes.map((l, i) => dueCard(l.id, T0 - (i + 1) * 1000));
+    const lesson = ['lx_3', 'lx_4', 'lx_5'];
+    const plan = buildSession({
+      cards,
+      lexemes,
+      logsByCard: noLogs,
+      now: T0,
+      lexemeIds: lesson,
+    });
+    expect(plan.items.length).toBeGreaterThan(0);
+    expect(plan.items.every((i) => lesson.includes(i.lexemeId))).toBe(true);
+  });
+
+  it('cannot flood the review queue: a lesson of six words yields at most six items', () => {
+    // The worry that motivated this: practising freely and suddenly owing a
+    // hundred reviews. One card per word per session caps the damage at the
+    // size of the lesson itself.
+    const lexemes = Array.from({ length: 6 }, (_, i) => lexeme(`lx_${i}`));
+    const cards = lexemes.flatMap((l) => cardsForLexeme(l, T0));
+    const lessonIds = lexemes.map((l) => l.id);
+    const plan = buildSession({
+      cards,
+      lexemes,
+      logsByCard: noLogs,
+      now: T0,
+      lexemeIds: lessonIds,
+    });
+    expect(plan.items.length).toBeLessThanOrEqual(6);
   });
 });
