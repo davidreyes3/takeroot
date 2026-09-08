@@ -185,6 +185,18 @@ export interface GymPlanInput {
   fillerCardIds: readonly string[];
   /** Cards to populate the matching grid, target excluded. */
   matchingPoolIds: readonly string[];
+  /**
+   * Whether the closing test is typed. Defaults to true.
+   *
+   * Typing is the strongest closing test there is - producing the spelling
+   * from nothing - and it is what the gym uses by default. But a learner
+   * working purely on reading has turned typing off everywhere else, and
+   * ending the gym with the one exercise they have opted out of would be a
+   * wall rather than a test. With this false the gym closes on a self-graded
+   * recall of the same card instead: weaker evidence, but still a real
+   * retrieval, and still the one answer allowed to move the schedule.
+   */
+  typedFinalTest?: boolean;
 }
 
 /**
@@ -258,12 +270,19 @@ export function buildGymPlan(input: GymPlanInput): GymPlan {
     });
   }
 
+  // The final test always grades the target card itself, never a sibling.
+  // The card is here because *its* againStreak and lapses flagged it, and only
+  // answering that card resets them - grading a sibling would leave the word
+  // flagged and drag it back into the gym next session, forever.
+  const typed = input.typedFinalTest ?? true;
   steps.push({
     kind: 'final_test',
-    exercise: 'type',
+    exercise: typed ? 'type' : 'flashcard',
     sequence: [target],
     countsForScheduling: true,
-    prompt: 'Now for real, no help: type it.',
+    prompt: typed
+      ? 'Now for real, no help: type it.'
+      : 'Now for real, no help. Answer it, then grade yourself honestly.',
   });
 
   return {

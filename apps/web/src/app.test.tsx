@@ -15,14 +15,28 @@ import { useApp } from './store.js';
 import { db, exportBackup } from './db.js';
 import { contentFiles } from './content.js';
 import { App } from './App.js';
-import { buildPath } from './screens/PathScreen.js';
+import { buildPath, packLessons } from './screens/PathScreen.js';
 import { parseContentFiles } from '@lang/core';
 
 async function resetDatabase() {
   await db.open();
-  await db.transaction('rw', db.cards, db.logs, db.mnemonics, db.settings, async () => {
-    await Promise.all([db.cards.clear(), db.logs.clear(), db.mnemonics.clear(), db.settings.clear()]);
-  });
+  await db.transaction(
+    'rw',
+    db.cards,
+    db.logs,
+    db.mnemonics,
+    db.settings,
+    db.customWords,
+    async () => {
+      await Promise.all([
+        db.cards.clear(),
+        db.logs.clear(),
+        db.mnemonics.clear(),
+        db.settings.clear(),
+        db.customWords.clear(),
+      ]);
+    },
+  );
   useApp.setState({
     ready: false,
     lexemes: [],
@@ -31,6 +45,8 @@ async function resetDatabase() {
     plan: null,
     cursor: 0,
     recentTimings: [],
+    excludedLexemeIds: new Set(),
+    customUnit: 0,
     sessionResults: [],
   });
 }
@@ -199,14 +215,13 @@ describe('the study loop', () => {
 });
 
 describe('the path', () => {
-  it('unlocks the first node and locks the later ones', async () => {
+  it('has no locked nodes - every lesson is open', async () => {
     await useApp.getState().init();
     const { lexemes, cards } = useApp.getState();
     const nodes = buildPath(lexemes, cards);
 
     expect(nodes.length).toBeGreaterThan(2);
-    expect(nodes[0]?.status).toBe('available');
-    expect(nodes[nodes.length - 1]?.status).toBe('locked');
+    expect(nodes.every((n) => n.status === 'available' || n.status === 'complete')).toBe(true);
   });
 
   it('reports zero mastery before anything is studied', async () => {
@@ -214,46 +229,300 @@ describe('the path', () => {
     const { lexemes, cards } = useApp.getState();
     expect(buildPath(lexemes, cards).every((n) => n.mastery === 0)).toBe(true);
   });
-});
 
-describe('practice anything', () => {
-  it('drills a card without ever touching its schedule', async () => {
+  it('starts a session confined to the lesson you tapped, mastery notwithstanding', async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: 'Practice' }));
-    await user.click(await screen.findByRole('button', { name: /small/i }));
-    await user.click(await screen.findByRole('button', { name: 'Recognize' }));
+    const nodes = await screen.findAllByRole('button', { name: /% mastered/ });
+    // Nothing has been studied, so this would have been locked under the old
+    // rule. It opens anyway - see buildPath.
+    await user.click(nodes[nodes.length - 1]!);
 
+    const plan = useApp.getState().plan!;
+    expect(plan.items.length).toBeGreaterThan(0);
+
+    const { lexemes, cards } = useApp.getState();
+    const lesson = buildPath(lexemes, cards)[nodes.length - 1]!;
+    const ids = new Set(lesson.lexemes.map((l) => l.id));
+    expect(plan.items.every((i) => ids.has(i.lexemeId))).toBe(true);
+
+    // The guard against a lesson tap becoming a hundred surprise reviews: one
+    // card per word, so a lesson can never contribute more than its own size.
+    expect(new Set(plan.items.map((i) => i.lexemeId)).size).toBe(plan.items.length);
+    expect(plan.items.length).toBeLessThanOrEqual(lesson.lexemes.length);
+  });
+
+  it('lets a lesson-tap answer move the schedule', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const nodes = await screen.findAllByRole('button', { name: /% mastered/ });
+    await user.click(nodes[0]!);
+
+    const cardId = useApp.getState().plan!.items[0]!.cardId;
     await user.click(await screen.findByRole('button', { name: /show answer/i }));
     await user.click(screen.getByText('Good'));
 
-    const katan = useApp.getState().lexemes.find((l) => l.lemmaBare === 'קטן')!;
-    const cardId = `${katan.id}:recall_he_en`;
-
-    // A rating was given, but the card is exactly as fresh as before: this is
-    // the countsForScheduling: false path, the same one the Leech Gym drills use.
-    expect(useApp.getState().cards.get(cardId)!.fsrs.state).toBe(0);
-
+    expect(useApp.getState().cards.get(cardId)!.fsrs.state).not.toBe(0);
     const logs = await db.logs.where('cardId').equals(cardId).toArray();
-    expect(logs).toHaveLength(1);
-    expect(logs[0]?.countsForScheduling).toBe(false);
+    expect(logs[0]?.countsForScheduling).toBe(true);
+  });
+});
 
-    // Let the due-count preview effect (which re-fires on every card change,
-    // practice included) settle before the test tears the tree down.
-    expect(await screen.findByRole('button', { name: 'Recognize' })).toBeInTheDocument();
+describe('reading before writing', () => {
+  it('keeps typing out of an ordinary session by default', async () => {
+    await useApp.getState().init();
+
+    // Graduate every reading card, which is what would otherwise unlock the
+    // tier-2 typing cards into the daily queue.
+    const cards = [...useApp.getState().cards.values()].map((c) =>
+      c.template === 'recall_he_en'
+        ? { ...c, fsrs: { ...c.fsrs, state: 2 as const, due: Date.now() - 1000 } }
+        : c,
+    );
+    await db.cards.bulkPut(cards);
+    await useApp.getState().init();
+
+    await useApp.getState().startSession();
+    expect(useApp.getState().plan!.items.every((i) => i.exercise !== 'type')).toBe(true);
   });
 
-  it('offers tier-3 agreement cards even though they are locked in the normal path', async () => {
+  it('offers typing as its own thing under Extras instead', async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: 'Practice' }));
-    await user.click(await screen.findByRole('button', { name: /small/i }));
+    await user.click(await screen.findByRole('button', { name: 'Extras' }));
+    expect(
+      await screen.findByRole('button', { name: /start writing practice/i }),
+    ).toBeInTheDocument();
+  });
 
-    // קטן is an adjective with real fs/mp/fp contrasts, gated to tier 3 in a
-    // normal session - Practice does not honour that gate.
-    expect(await screen.findByRole('button', { name: 'Feminine' })).toBeInTheDocument();
+  it('will not offer a word for spelling before it can be read', async () => {
+    await useApp.getState().init();
+    const plan = await useApp.getState().previewSession({ templates: ['type_he'] });
+    expect(plan.items).toHaveLength(0);
+  });
+});
+
+describe('session size', () => {
+  it('never hands back more cards than the chosen session length', async () => {
+    await useApp.getState().init();
+    await useApp.getState().setSessionLength(8);
+    await useApp.getState().startSession();
+    expect(useApp.getState().plan!.items.length).toBeLessThanOrEqual(8);
+    await useApp.getState().setSessionLength(12);
+  });
+});
+
+describe('removing words and lessons', () => {
+  it('hides a removed word from the path and from sessions', async () => {
+    await useApp.getState().init();
+    const katan = useApp.getState().lexemes.find((l) => l.lemmaBare === 'קטן')!;
+
+    await useApp.getState().setLexemeExcluded(katan.id, true);
+    const plan = await useApp.getState().previewSession();
+    expect(plan.items.some((i) => i.lexemeId === katan.id)).toBe(false);
+
+    const visible = useApp
+      .getState()
+      .lexemes.filter((l) => !useApp.getState().excludedLexemeIds.has(l.id));
+    expect(visible.some((l) => l.id === katan.id)).toBe(false);
+
+    // And restoring it undoes exactly that - nothing about the word itself
+    // was touched.
+    await useApp.getState().setLexemeExcluded(katan.id, false);
+    expect(useApp.getState().lexemes.some((l) => l.id === katan.id)).toBe(true);
+  });
+
+  it('removes every word in a lesson at once, and restores them together', async () => {
+    await useApp.getState().init();
+    const { lexemes, cards } = useApp.getState();
+    const lesson = buildPath(lexemes, cards)[0]!;
+    const ids = lesson.lexemes.map((l) => l.id);
+
+    await useApp.getState().setLexemesExcluded(ids, true);
+    expect(ids.every((id) => useApp.getState().excludedLexemeIds.has(id))).toBe(true);
+
+    await useApp.getState().setLexemesExcluded(ids, false);
+    expect(ids.some((id) => useApp.getState().excludedLexemeIds.has(id))).toBe(false);
+  });
+
+  it('survives a reload, so it is a real setting rather than session state', async () => {
+    await useApp.getState().init();
+    const katan = useApp.getState().lexemes.find((l) => l.lemmaBare === 'קטן')!;
+    await useApp.getState().setLexemeExcluded(katan.id, true);
+
+    await useApp.getState().init();
+    expect(useApp.getState().excludedLexemeIds.has(katan.id)).toBe(true);
+  });
+});
+
+describe('adding words and lessons', () => {
+  it('adds a word to a new lesson, which then shows up on the path', async () => {
+    await useApp.getState().init();
+    const before = buildPath(useApp.getState().lexemes, useApp.getState().cards).length;
+
+    const result = await useApp.getState().addCustomWord({
+      lemma: 'מחשב',
+      translit: 'machshev',
+      glosses: ['computer'],
+      pos: 'noun',
+      group: 'Technology',
+    });
+    expect(result.ok).toBe(true);
+
+    const { lexemes, cards } = useApp.getState();
+    const added = lexemes.find((l) => l.lemmaBare === 'מחשב');
+    expect(added).toBeDefined();
+    expect(added!.group).toBe('Technology');
+    expect(cards.has(`${added!.id}:recall_he_en`)).toBe(true);
+
+    const nodes = buildPath(lexemes, cards);
+    expect(nodes.length).toBe(before + 1);
+    expect(nodes[nodes.length - 1]!.title).toBe('Technology');
+  });
+
+  it('groups two words added to the same lesson out of order together', async () => {
+    // A lesson under 4 words merges into its neighbour on the path, same as
+    // any other short lesson - see packLessons. So the thing worth proving
+    // here is not the title, it's that a Reading word landing between two
+    // Technology ones does not split Technology across two path nodes.
+    await useApp.getState().init();
+
+    await useApp.getState().addCustomWord({
+      lemma: 'מחשב',
+      translit: '',
+      glosses: ['computer'],
+      pos: 'noun',
+      group: 'Technology',
+    });
+    await useApp.getState().addCustomWord({
+      lemma: 'ספר',
+      translit: '',
+      glosses: ['book'],
+      pos: 'noun',
+      group: 'Reading',
+    });
+    await useApp.getState().addCustomWord({
+      lemma: 'טלפון',
+      translit: '',
+      glosses: ['phone'],
+      pos: 'noun',
+      group: 'Technology',
+    });
+
+    const customLexemes = useApp.getState().lexemes.filter((l) => l.sourceFile === 'custom');
+    const lessons = packLessons(customLexemes);
+    const techLessons = lessons.filter((lesson) => lesson.lexemes.some((l) => l.group === 'Technology'));
+    expect(techLessons).toHaveLength(1);
+    expect(
+      techLessons[0]!.lexemes.filter((l) => l.group === 'Technology').map((l) => l.lemmaBare),
+    ).toEqual(['מחשב', 'טלפון']);
+  });
+
+  it('rejects a word that is already in the course', async () => {
+    await useApp.getState().init();
+    const katan = useApp.getState().lexemes.find((l) => l.lemmaBare === 'קטן')!;
+
+    const result = await useApp.getState().addCustomWord({
+      lemma: katan.lemma,
+      translit: '',
+      glosses: ['small'],
+      pos: katan.pos,
+      group: 'Duplicates',
+    });
+    expect(result).toEqual({ ok: false, error: expect.stringContaining('already') });
+  });
+
+  it('rejects non-Hebrew input and a missing lesson name', async () => {
+    await useApp.getState().init();
+    const notHebrew = await useApp.getState().addCustomWord({
+      lemma: 'computer',
+      translit: '',
+      glosses: ['computer'],
+      pos: 'noun',
+      group: 'Technology',
+    });
+    expect(notHebrew.ok).toBe(false);
+
+    const noLesson = await useApp.getState().addCustomWord({
+      lemma: 'מחשב',
+      translit: '',
+      glosses: ['computer'],
+      pos: 'noun',
+      group: '',
+    });
+    expect(noLesson.ok).toBe(false);
+  });
+
+  it('can be studied and counts for scheduling like any other word', async () => {
+    await useApp.getState().init();
+    await useApp.getState().addCustomWord({
+      lemma: 'מחשב',
+      translit: 'machshev',
+      glosses: ['computer'],
+      pos: 'noun',
+      group: 'Technology',
+    });
+
+    const plan = await useApp.getState().previewSession({
+      lexemeIds: useApp.getState().lexemes.filter((l) => l.group === 'Technology').map((l) => l.id),
+    });
+    expect(plan.items.length).toBe(1);
+
+    await useApp.getState().answer({
+      cardId: plan.items[0]!.cardId,
+      rating: 3,
+      elapsedMs: 1000,
+      exercise: 'flashcard',
+    });
+    const card = useApp.getState().cards.get(plan.items[0]!.cardId)!;
+    expect(card.fsrs.state).not.toBe(0);
+  });
+
+  it('survives a reload', async () => {
+    await useApp.getState().init();
+    await useApp.getState().addCustomWord({
+      lemma: 'מחשב',
+      translit: 'machshev',
+      glosses: ['computer'],
+      pos: 'noun',
+      group: 'Technology',
+    });
+
+    await useApp.getState().init();
+    expect(useApp.getState().lexemes.some((l) => l.lemmaBare === 'מחשב')).toBe(true);
+  });
+});
+
+describe('the word list in Settings', () => {
+  it('narrows the visible words as you type, without removing anything', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: 'Settings' }));
+
+    const before = await screen.findAllByRole('checkbox');
+    await user.type(screen.getByLabelText('Search your words'), 'small');
+
+    const after = screen.getAllByRole('checkbox');
+    expect(after.length).toBeLessThan(before.length);
+    expect(after.length).toBeGreaterThan(0);
+
+    // Nothing was actually excluded by searching.
+    expect(useApp.getState().excludedLexemeIds.size).toBe(0);
+  });
+
+  it('unchecking a word removes it, and it stops showing up in a session', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: 'Settings' }));
+
+    await user.type(screen.getByLabelText('Search your words'), 'small');
+    const katan = useApp.getState().lexemes.find((l) => l.lemmaBare === 'קטן')!;
+    await user.click(await screen.findByLabelText(`Study ${katan.lemma}`));
+
+    expect(useApp.getState().excludedLexemeIds.has(katan.id)).toBe(true);
   });
 });
 
@@ -262,6 +531,7 @@ describe('mnemonics library', () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await user.click(await screen.findByRole('button', { name: 'Extras' }));
     await user.click(await screen.findByRole('button', { name: 'Mnemonics' }));
     await user.click(await screen.findByRole('button', { name: /small/i }));
 
@@ -301,7 +571,7 @@ describe('backup', () => {
     expect(createSpy).toHaveBeenCalledTimes(1);
     expect(revokeSpy).toHaveBeenCalledTimes(1);
     const parsed = JSON.parse(await capturedBlob!.text());
-    expect(parsed.version).toBe(1);
+    expect(parsed.version).toBe(2);
     expect(
       parsed.cards.some((c: { id: string; fsrs: { reps: number } }) => c.id === cardId && c.fsrs.reps === 1),
     ).toBe(true);

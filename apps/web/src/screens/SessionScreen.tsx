@@ -69,6 +69,9 @@ export function SessionScreen({ plan, cursor, cards, lexemes, onFinish }: Sessio
           onFinalAnswer={(cardId, correct, elapsedMs, usedHint) => {
             void answer({ cardId, correct, usedHint, elapsedMs, exercise: 'type' });
           }}
+          onFinalRating={(cardId, rating, elapsedMs) => {
+            void answer({ cardId, rating, elapsedMs, exercise: 'flashcard' });
+          }}
           onSaveMnemonic={(lexemeId, keyword, image) => {
             void saveMnemonic(lexemeId, keyword, image);
           }}

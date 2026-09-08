@@ -20,7 +20,7 @@ several of those decisions look arbitrary until you know the reason.
 
 ```bash
 npm run dev            # http://localhost:5173  (port is pinned, see below)
-npm test               # 278 tests
+npm test               # 327 tests
 npm run test:watch
 npm run typecheck      # tsc -b across the workspace
 npm run content:check  # validate content/, report what the app had to guess
@@ -52,7 +52,9 @@ apps/web          React 19 + Vite 6 PWA, local-first
   store.ts          zustand. Coordinates; never decides.
   db.ts             Dexie, backup export/import, SyncAdapter seam
   face.ts           what each card template shows, front and back
-  screens/          PathScreen (+ packLessons), SessionScreen
+  screens/          PathScreen (+ packLessons, LessonPath, buildPath),
+                    ExtrasScreen, WordListManager, SessionScreen, SettingsScreen
+  customWords.ts    words/lessons added in-app; merged into Lexeme[] at init
   exercises/        Flashcard, TypeAnswer, Matching, GymRunner
   components/       Word, HebrewKeyboard, AgreementTable, MnemonicBuilder
 
@@ -79,7 +81,9 @@ rewrite. Don't weaken it.
   A tier unlocks when every lower-tier sibling reaches FSRS Review state.
 - **ReviewLog** — append-only. Never mutated, never deleted.
 - **Session** — built fresh by `buildSession`. Order is warm-up → gym →
-  reviews → new, all capped.
+  reviews → new, all capped, and the whole thing capped again by `maxItems`.
+  A session can be narrowed to a set of words (one lesson, for practice) or a
+  set of templates (typing only, for writing practice).
 
 ---
 
@@ -109,6 +113,42 @@ the interval. Only production exercises (typing, form drills) can earn it.
 memory strength, and it's exactly the signal a self-graded flashcard discards.
 "Slow" is 2.5× the learner's rolling median, floored at 6s.
 
+**One session cap sits above the per-stage caps.** `maxReviews`, `maxNew` and
+`maxGym` bound each queue separately, which still adds up to a sitting long
+enough that you stop opening the app. `maxItems` (default 12, settable) is the
+number that decides how long a session actually is. It budgets the new words
+*first* and gives the earlier stages what is left — applied as a plain running
+total, a steady backlog eats every slot and you never meet another new word.
+What does not fit is not skipped: it stays due, and `stats.dueRemaining` says
+how much.
+
+**Typing is a setting, off by default, not a deleted feature.** Reading is the
+current goal; spelling from memory is a different skill, and mixing it in paces
+every session by the harder one. The cards and their history stay either way —
+Extras → Writing practice studies them on demand. Two distinct notions in
+`buildSession` make this work, and confusing them breaks something quietly:
+`templates` narrows what a session may *ask* (writing practice), while
+`disabledTemplates` marks templates that will never be studied at all. Only the
+latter is hidden from tier gating. Get it backwards and either the tier-3
+agreement cards lock away forever behind a `type_he` card that can never
+graduate, or writing practice asks you to spell words you cannot yet read.
+
+**The gym closes on a self-graded recall when typing is off.** It has to close
+on *something* that reschedules, or a leech never graduates. And that something
+must be the target card itself, never a sibling: the card is in the gym because
+*its* `againStreak` and lapses flagged it, and only answering that card resets
+them. Grading a sibling leaves the word flagged and drags it back in forever.
+
+**Tapping a path node answers count for scheduling, and stay inside that
+lesson.** There used to be a separate Practice tab, a flat browser of every
+word logging everything with `countsForScheduling: false` — that threw away
+the strongest evidence the scheduler could have, and got folded into the path
+once the path itself stopped locking anything (see the path-unlocking
+decision above). What keeps counting from becoming a hundred surprise reviews
+is not the flag, it is the scope: `startSession({ lexemeIds })` sees only the
+tapped lesson's words, still takes at most one card per word, and is still
+capped by the session length, so a six-word lesson can add at most six cards.
+
 **Word identity ignores niqqud** — it's (consonantal spelling + part of speech
 + optional `key:`). That's what lets you retranslate, add vowel points, or move
 a word between files without losing history. The cost is that true minimal
@@ -130,9 +170,36 @@ meaning and left ragged two-word tails that completed instantly. See
 `packLessons` in `PathScreen.tsx`: groups under 4 words merge into their
 neighbour, over 8 split, leftover tails re-split evenly.
 
-**Path nodes unlock at 60% mastery, not 100%.** Requiring perfection would gate
-the whole course behind whichever single word you find impossible — and that
-word is what the gym is for.
+**Every path node is open — this reverses an earlier decision.** Nodes used to
+unlock only once the one before hit 60% mastery, on the reasoning that
+requiring perfection would gate the whole course behind whichever single word
+you find impossible. That was true, but the fix cost something else: no way
+to jump to a specific lesson on purpose, ahead of or behind where mastery
+happened to be. Tapping a node now always starts a session scoped to that
+lesson (`startSession({ lexemeIds })`), whether or not it's "next" — see
+`PathScreen.tsx`. The mastery ring is still there; it just no longer gates.
+
+**Removing a word or a lesson hides it, it never deletes it.** Settings keeps
+an `excludedLexemeIds` set (`db.ts`/`store.ts`); the path, sessions and Extras
+all filter through `visibleLexemes()` before anything else touches the list.
+Nothing about the word changes — its cards and history are untouched, and
+unchecking it in the word list brings it straight back. This has to be true
+for markdown-authored words, since the app cannot write back to those files;
+kept true for added words too, so "remove" means one thing everywhere.
+
+**Words and lessons added from inside the app are a runtime overlay, not a
+markdown edit.** `customWords.ts` + a `customWords` Dexie table hold them; they
+merge into the same `Lexeme[]` every other word lives in at `init()`, so
+nothing downstream needs to know a word didn't come from a file. This is a
+different, smaller thing than "in-app editing that writes back to markdown"
+(still on the roadmap below) — a custom word never touches `content/hebrew/`,
+never appears in `docs/source-vocabulary.md`, and `npm run content:check`
+doesn't see it. All custom lexemes land in one synthetic unit, one past
+whatever the authored content uses, recomputed on every load. Ordering them by
+plain creation time would let an unrelated lesson's word land between two
+words of an earlier lesson and split it on the path — `orderCustomWords`
+groups by first-appearance instead, so a lesson stays one lesson no matter
+what order you add to it in.
 
 **New words are withheld above 80 due cards.** The failure mode that kills SRS
 habits is opening the app to a 400-card wall, and it's self-inflicted by
@@ -277,33 +344,44 @@ for the user — see item 1 below.
 
 Working: content pipeline with validation and markdown-table support, FSRS-6
 scheduling, card generation with tier gating, leech detection, the full gym
-escalation, session queue, path screen, three exercises (flashcard / typing
-with an on-screen Hebrew keyboard / matching), mnemonic builder with a worked
-example, local persistence, GitHub Pages deployment.
+escalation, session queue with a settable length, an unlocked path where
+tapping any lesson studies it directly, a Settings word list to remove or add
+words and lessons (search-filterable, non-destructive), Extras (writing
+practice + mnemonics), three exercises (flashcard / typing with an on-screen
+Hebrew keyboard / matching), mnemonic builder with a worked example, backup
+export/import, local persistence, GitHub Pages deployment.
+
+A note on the session cap, measured rather than assumed. Running the real
+`buildSession` loop over the actual 204-word course for 200 days, answering
+every card with no Easy ratings and no rest days, the steady-state daily load
+once caught up is about 12 cards. A cap of 12 therefore holds a standing
+backlog of roughly 70 indefinitely; the backlog clears completely at 18 and
+above, where typical days still come out around 12 cards. The default is 12
+because a short sitting was the explicit request, but 20 is the setting that
+lets the course finish.
 
 Next, roughly in order:
 
-1. **Export / Import UI.** `exportBackup()` and `importBackup()` already exist
-   in `db.ts` but nothing calls them. Until something does, there is no way to
-   move progress from localhost to the deployed site, and the two diverge. This
-   is the top priority precisely *because* the app is now deployed.
-2. **PWA manifest + service worker.** Installing to an iPhone home screen for
-   free was the whole reason for choosing a web app over paying Apple's
-   $99/year. Now that it's hosted, this is what cashes that in. Push
-   notifications follow (iOS 16.4+ supports them for installed PWAs).
-3. The four spec'd but unbuilt exercises: multiple choice, speed round, cloze,
+1. Push notifications (iOS 16.4+ supports them for installed PWAs), now that
+   the PWA manifest and service worker are in place.
+2. The four spec'd but unbuilt exercises: multiple choice, speed round, cloze,
    form drills. (`GymRunner` currently filters out `speed` steps.)
-4. **Confusable words** — link words by shared root, spelling distance and
+3. **Confusable words** — link words by shared root, spelling distance and
    sound distance; when two linked words are both struggling, put them in the
    same matching grid. Contrastive practice is what resolves interference.
    Spec'd in `docs/PLAN.md`.
-5. Verb conjugation (binyanim) — the big grammar piece. The content has 14
+4. Verb conjugation (binyanim) — the big grammar piece. The content has 14
    verbs listed as present-tense participles with separate masculine and
    feminine entries, which is how the source course teaches them.
-6. FSRS parameter optimizer (`fsrs-browser`, WASM) once there's history to
+5. FSRS parameter optimizer (`fsrs-browser`, WASM) once there's history to
    train on.
-7. In-app editing writing back to markdown.
-8. Playwright end-to-end and an accessibility pass.
+6. In-app editing that writes back to `content/hebrew/*.md` itself, so a word
+   added or edited in the app becomes part of the authored course rather than
+   a runtime overlay next to it. Adding words/lessons and hiding words in
+   Settings both work today (see the two decisions above) - what's still
+   missing is folding a custom word into the real content file, and editing
+   an existing authored word from inside the app at all.
+7. Playwright end-to-end and an accessibility pass.
 
 Worth a review pass, and flagged to the user: the part-of-speech and lesson
 groupings in `content/hebrew/` were assigned mechanically, not by them. Known

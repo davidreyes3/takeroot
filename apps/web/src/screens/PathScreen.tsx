@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { Card, Lexeme } from '@lang/core';
+import { useApp } from '../store.js';
 
 /**
  * A lesson wants roughly this many words: enough to be worth opening, few
@@ -14,7 +15,7 @@ export interface LessonNode {
   title: string;
   lexemes: Lexeme[];
   mastery: number;
-  status: 'locked' | 'available' | 'complete';
+  status: 'available' | 'complete';
 }
 
 /**
@@ -106,10 +107,14 @@ function splitEvenly(name: string, words: readonly Lexeme[]): { title: string; l
 /**
  * Build the path.
  *
- * A node unlocks when the one before it is 60% mastered rather than 100%.
- * Requiring perfection would gate the entire course behind whichever word you
- * personally find impossible, and that word is exactly what the Leech Gym is
- * for - it does not belong in the way of new material.
+ * Every node is open. Nodes used to unlock only once the one before it hit
+ * 60% mastery - the reasoning was that gating the whole course behind one
+ * stubborn word would be worse than letting mastery lag, and that is still
+ * true, but the fix traded away something else: there was no way to jump
+ * ahead, or back, to study one specific lesson on purpose. This is a
+ * deliberate reversal of that decision, in favour of trusting the learner to
+ * order their own course. The ring around each node still tracks mastery -
+ * it just no longer gates anything.
  */
 export function buildPath(lexemes: readonly Lexeme[], cards: ReadonlyMap<string, Card>): LessonNode[] {
   const byUnit = new Map<number, Lexeme[]>();
@@ -135,17 +140,9 @@ export function buildPath(lexemes: readonly Lexeme[], cards: ReadonlyMap<string,
         title: lesson.title,
         lexemes: lesson.lexemes,
         mastery,
-        status: 'locked',
+        status: mastery >= 1 ? 'complete' : 'available',
       });
     });
-  }
-
-  for (let i = 0; i < nodes.length; i++) {
-    const node = nodes[i] as LessonNode;
-    const previous = nodes[i - 1];
-    if (node.mastery >= 1) node.status = 'complete';
-    else if (i === 0 || (previous && previous.mastery >= 0.6)) node.status = 'available';
-    else node.status = 'locked';
   }
 
   return nodes;
@@ -157,9 +154,15 @@ export interface PathScreenProps {
   unitTitles: Map<number, string>;
 }
 
-export function PathScreen({ lexemes, cards, unitTitles }: PathScreenProps) {
-  const nodes = useMemo(() => buildPath(lexemes, cards), [lexemes, cards]);
+export interface LessonPathProps {
+  nodes: LessonNode[];
+  unitTitles: Map<number, string>;
+  /** Tapping a node studies that lesson - see PathScreen. */
+  onSelect: (node: LessonNode) => void;
+}
 
+/** The stepping-stone path itself. Every node is open; see `buildPath`. */
+export function LessonPath({ nodes, unitTitles, onSelect }: LessonPathProps) {
   const units = useMemo(() => {
     const grouped = new Map<number, LessonNode[]>();
     for (const node of nodes) {
@@ -171,7 +174,7 @@ export function PathScreen({ lexemes, cards, unitTitles }: PathScreenProps) {
   }, [nodes]);
 
   return (
-    <div className="path">
+    <>
       {units.map(([unit, unitNodes]) => (
         <section key={unit} className="unit">
           <div className="unit-head">
@@ -183,14 +186,12 @@ export function PathScreen({ lexemes, cards, unitTitles }: PathScreenProps) {
                 <div>
                   <button
                     className="node"
-                    disabled={node.status === 'locked'}
                     style={{ ['--mastery' as string]: node.mastery }}
+                    onClick={() => onSelect(node)}
                     aria-label={`${node.title}, ${Math.round(node.mastery * 100)}% mastered`}
                   >
                     <span className="ring" aria-hidden="true" />
-                    <span className="glyph">
-                      {node.status === 'complete' ? '✓' : node.status === 'locked' ? '\u{1F512}' : '✦'}
-                    </span>
+                    <span className="glyph">{node.status === 'complete' ? '✓' : '✦'}</span>
                   </button>
                   <div className="node-label">{node.title}</div>
                 </div>
@@ -199,6 +200,39 @@ export function PathScreen({ lexemes, cards, unitTitles }: PathScreenProps) {
           </div>
         </section>
       ))}
+    </>
+  );
+}
+
+/**
+ * The path, unlocked: every lesson is tappable, and tapping one studies just
+ * that lesson.
+ *
+ * This used to be a read-only progress display, with a separate Practice tab
+ * doing what tapping a node now does directly. Folding the two together only
+ * works because the lock is gone - a locked node could not honestly also be a
+ * shortcut into that lesson.
+ *
+ * Answers here count towards scheduling, same as anywhere else. What keeps
+ * that from turning into a hundred surprise reviews is scope, not the
+ * counting: `startSession` is confined to the tapped lesson's words, so it
+ * still takes at most one card per word and is still capped by the session
+ * length - a six-word lesson can add at most six cards, no matter how often
+ * it is opened.
+ */
+export function PathScreen({ lexemes, cards, unitTitles }: PathScreenProps) {
+  const startSession = useApp((s) => s.startSession);
+  const nodes = useMemo(() => buildPath(lexemes, cards), [lexemes, cards]);
+
+  return (
+    <div className="path">
+      <LessonPath
+        nodes={nodes}
+        unitTitles={unitTitles}
+        onSelect={(node) => {
+          void startSession({ lexemeIds: node.lexemes.map((l) => l.id) });
+        }}
+      />
     </div>
   );
 }

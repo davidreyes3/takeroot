@@ -24,6 +24,9 @@ export const CARD_TIER: Readonly<Record<CardTemplate, number>> = {
   form_fp: 3,
 };
 
+/** Every template, in tier order. Handy for building "all but X" filters. */
+export const ALL_CARD_TEMPLATES: readonly CardTemplate[] = Object.keys(CARD_TIER) as CardTemplate[];
+
 /** Which templates make sense for this particular word. */
 export function templatesFor(lexeme: Lexeme): CardTemplate[] {
   const templates: CardTemplate[] = ['recall_he_en', 'recall_en_he'];

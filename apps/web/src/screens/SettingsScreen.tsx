@@ -1,6 +1,14 @@
 import { useRef, useState } from 'react';
-import { useApp } from '../store.js';
+import type { Lexeme } from '@lang/core';
+import { useApp, SESSION_LENGTHS } from '../store.js';
 import { exportBackup, importBackup } from '../db.js';
+import { WordListManager } from './WordListManager.js';
+
+export interface SettingsScreenProps {
+  /** The whole corpus, hidden words included - the word list needs to see it all. */
+  lexemes: Lexeme[];
+  unitTitles: Map<number, string>;
+}
 
 /**
  * Backup, the manual answer to "sync later".
@@ -11,8 +19,9 @@ import { exportBackup, importBackup } from '../db.js';
  * move progress from one place to another, not to reconcile two places that
  * were both studied in. Study in one place, back up, restore elsewhere.
  */
-export function SettingsScreen() {
+export function SettingsScreen({ lexemes, unitTitles }: SettingsScreenProps) {
   const init = useApp((s) => s.init);
+  const { sessionLength, setSessionLength, typingEnabled, setTypingEnabled } = useApp();
   const [status, setStatus] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -74,6 +83,47 @@ export function SettingsScreen() {
 
       <div className="card" style={{ minHeight: 0, alignItems: 'stretch', gap: 14 }}>
         <div>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Cards per session</div>
+          <div className="muted" style={{ fontSize: 13 }}>
+            The ceiling on one sitting, everything included. Nothing is skipped by choosing a
+            short session - whatever does not fit stays due and leads the next one.
+          </div>
+        </div>
+        <div className="row" role="group" aria-label="Cards per session">
+          {SESSION_LENGTHS.map((n) => (
+            <button
+              key={n}
+              className="pill pressable"
+              aria-pressed={sessionLength === n}
+              data-active={sessionLength === n}
+              onClick={() => void setSessionLength(n)}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="card" style={{ minHeight: 0, alignItems: 'stretch', gap: 14 }}>
+        <div>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Typing exercises</div>
+          <div className="muted" style={{ fontSize: 13 }}>
+            Off means sessions ask you to read and recall, never to spell. Spelling is still there
+            whenever you want it, under Extras &gt; Writing practice, and the cards keep their
+            history either way.
+          </div>
+        </div>
+        <button
+          className="btn secondary"
+          aria-pressed={typingEnabled}
+          onClick={() => void setTypingEnabled(!typingEnabled)}
+        >
+          {typingEnabled ? 'Typing is on — turn it off' : 'Typing is off — turn it on'}
+        </button>
+      </div>
+
+      <div className="card" style={{ minHeight: 0, alignItems: 'stretch', gap: 14 }}>
+        <div>
           <div style={{ fontWeight: 600, marginBottom: 4 }}>Export a backup</div>
           <div className="muted" style={{ fontSize: 13 }}>
             Downloads every word's progress, review history and mnemonics as one file.
@@ -106,6 +156,16 @@ export function SettingsScreen() {
       </div>
 
       {status && <div className={status.kind === 'ok' ? 'banner calm' : 'banner'}>{status.text}</div>}
+
+      <div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>Word list</div>
+        <div className="muted" style={{ fontSize: 13, marginBottom: 12 }}>
+          Remove a word or a whole lesson to hide it from the path, sessions and Extras - nothing
+          is deleted, and unchecking it brings it straight back. Add a word to start a new lesson
+          or extend one you already made.
+        </div>
+        <WordListManager lexemes={lexemes} unitTitles={unitTitles} />
+      </div>
     </div>
   );
 }

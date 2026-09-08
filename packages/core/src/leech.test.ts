@@ -284,3 +284,41 @@ describe('the drill alternates direction', () => {
     expect(seq).toEqual(['A', 'B', 'C', 'A', 'B', 'C']);
   });
 });
+
+describe('the gym when typing is switched off', () => {
+  const fillers = ['c1', 'c2', 'c3', 'c4', 'c5'];
+
+  it('still ends on one counting test, self-graded instead of typed', () => {
+    // The gym has to end on something that reschedules the card, or a leech
+    // never graduates. With typing off that becomes a self-graded recall.
+    const plan = buildGymPlan({
+      card: card({ againStreak: 3 }),
+      lexeme,
+      verdict: { isLeech: true, reason: 'again_streak', severity: 0.5 },
+      fillerCardIds: fillers,
+      matchingPoolIds: fillers,
+      typedFinalTest: false,
+    });
+    const last = plan.steps[plan.steps.length - 1];
+    expect(last?.kind).toBe('final_test');
+    expect(last?.exercise).toBe('flashcard');
+    expect(last?.countsForScheduling).toBe(true);
+    expect(plan.steps.filter((s) => s.countsForScheduling)).toHaveLength(1);
+  });
+
+  it('still grades the leech card itself, so the again-streak can reset', () => {
+    // Grading a sibling instead would leave the flagged card's againStreak
+    // untouched, and it would be dragged back into the gym every session.
+    const plan = buildGymPlan({
+      card: card({ againStreak: 3 }),
+      lexeme,
+      verdict: { isLeech: true, reason: 'again_streak', severity: 0.5 },
+      targetVariantIds: ['lx_1:recall_he_en', 'lx_1:recall_en_he'],
+      fillerCardIds: fillers,
+      matchingPoolIds: fillers,
+      typedFinalTest: false,
+    });
+    const last = plan.steps[plan.steps.length - 1];
+    expect(last?.sequence).toEqual([plan.targetCardId]);
+  });
+});
