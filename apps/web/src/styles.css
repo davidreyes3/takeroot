@@ -68,12 +68,14 @@ input { font: inherit; }
   max-width: 560px;
   margin: 0 auto;
   /*
-   * Top padding adds the safe-area inset on top of the usual 24px, not
-   * instead of it - installed full-screen on iOS, the status bar is
-   * black-translucent (drawn over the page, not pushing it down), so
-   * without this the header sits under the notch / Dynamic Island.
+   * Top and bottom padding both add the safe-area inset on top of the usual
+   * 24px, not instead of it - installed full-screen on iOS, the status bar
+   * is black-translucent (drawn over the page, not pushing it down) and the
+   * home indicator sits in the same kind of overlay area at the bottom, so
+   * without this the header sits under the notch and the last line of
+   * content sits under the indicator.
    */
-  padding: calc(24px + env(safe-area-inset-top)) 20px 96px;
+  padding: calc(24px + env(safe-area-inset-top)) 20px calc(24px + env(safe-area-inset-bottom));
 }
 
 /* --- header ------------------------------------------------------------- */
@@ -215,19 +217,6 @@ input { font: inherit; }
   margin-top: 6px;
   max-width: 120px;
 }
-
-/* --- study button ------------------------------------------------------- */
-
-.study-bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  padding: 14px 20px calc(14px + env(safe-area-inset-bottom));
-  background: linear-gradient(to top, var(--bg) 60%, transparent);
-}
-
-.study-bar-inner { max-width: 520px; margin: 0 auto; }
 
 .btn {
   width: 100%;
@@ -396,19 +385,18 @@ input { font: inherit; }
 .summary-row input[type="checkbox"] { accent-color: var(--accent); width: 18px; height: 18px; flex: none; }
 
 /*
- * Pinned to the top of the viewport once scrolled there, so a shrinking
- * result list beneath it (typing narrows the word list a lot) can't push it
- * around or out from under an on-screen keyboard - see WordListManager.tsx.
- * The background stops the list scrolling underneath it from showing through.
+ * A fixed-height scroll region of its own, not plain document flow - see the
+ * comment above it in WordListManager.tsx. `dvh` (dynamic viewport height)
+ * tracks the *visible* viewport on mobile, shrinking with an on-screen
+ * keyboard rather than staying pinned to the layout viewport the way `vh`
+ * does; the `vh` line first is a fallback for browsers that don't know `dvh`
+ * and simply ignore it.
  */
-.sticky-search {
-  position: sticky;
-  top: env(safe-area-inset-top);
-  z-index: 5;
-  background: var(--bg);
-  padding: 10px 0;
-  margin: 0 -20px;
-  padding-inline: 20px;
+.word-list-results {
+  height: 60vh;
+  height: 60dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* --- agreement table ---------------------------------------------------- */

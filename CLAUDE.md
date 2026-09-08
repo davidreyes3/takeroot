@@ -20,7 +20,7 @@ several of those decisions look arbitrary until you know the reason.
 
 ```bash
 npm run dev            # http://localhost:5173  (port is pinned, see below)
-npm test               # 327 tests
+npm test               # 347 tests
 npm run test:watch
 npm run typecheck      # tsc -b across the workspace
 npm run content:check  # validate content/, report what the app had to guess
@@ -53,7 +53,8 @@ apps/web          React 19 + Vite 6 PWA, local-first
   db.ts             Dexie, backup export/import, SyncAdapter seam
   face.ts           what each card template shows, front and back
   screens/          PathScreen (+ packLessons, LessonPath, buildPath),
-                    ExtrasScreen, WordListManager, SessionScreen, SettingsScreen
+                    LessonPreview, ExtrasScreen, WordListManager,
+                    SessionScreen, SettingsScreen
   customWords.ts    words/lessons added in-app; merged into Lexeme[] at init
   exercises/        Flashcard, TypeAnswer, Matching, GymRunner
   components/       Word, HebrewKeyboard, AgreementTable, MnemonicBuilder
@@ -139,15 +140,54 @@ must be the target card itself, never a sibling: the card is in the gym because
 *its* `againStreak` and lapses flagged it, and only answering that card resets
 them. Grading a sibling leaves the word flagged and drags it back in forever.
 
-**Tapping a path node answers count for scheduling, and stay inside that
-lesson.** There used to be a separate Practice tab, a flat browser of every
-word logging everything with `countsForScheduling: false` — that threw away
-the strongest evidence the scheduler could have, and got folded into the path
-once the path itself stopped locking anything (see the path-unlocking
-decision above). What keeps counting from becoming a hundred surprise reviews
-is not the flag, it is the scope: `startSession({ lexemeIds })` sees only the
-tapped lesson's words, still takes at most one card per word, and is still
-capped by the session length, so a six-word lesson can add at most six cards.
+**Leech detection combines lapses across recall_he_en and recall_en_he.**
+Each recognition card carries its own lapse count, and originally that was
+also the only thing `assessLeech` looked at - a word failed twice reading it
+and twice producing it never crossed the threshold of 4 on either card alone,
+even though it had genuinely been forgotten four times. `assessLeech` takes an
+optional `companionLapses` (the word's opposite-direction card's own lapses)
+and adds it to the card's own count before comparing to the threshold; the
+result is `totalLapses` on the verdict, which `buildGymPlan`'s mnemonic
+trigger reads too, so a word forgotten from both directions gets the mnemonic
+step as readily as one forgotten three times from a single direction. The
+against-streak and rolling-accuracy checks stay per-card - a streak is
+inherently about one card's own consecutive answers, not a mixable quantity.
+`session.ts` looks up the companion by id (`${lexemeId}:${otherTemplate}`)
+and stores every verdict it computes in a map, reused when building that
+leech's gym plan rather than calling `assessLeech` a second time - it can't
+disagree with the judgement that put the card in the gym in the first place.
+
+**Two Agains in a row trips the gym, not three.** `againStreakThreshold` was
+3; missing the same card twice in one sitting is already good evidence you
+don't know it, and waiting for a third failure before offering help was
+making someone prove they were struggling before the app acted on it.
+
+**There is no global Study button, and no whole-course session — this
+reverses another earlier decision.** The app used to have a single "Study"
+button pulling from every lesson's due cards at once. That produced exactly
+the failure mode the whole design set out to avoid: studying "Family" for
+five minutes could surface a "Greetings" word you had no intention of
+touching, the due count was one number covering the entire course, and it
+kept growing regardless of which lesson you actually worked on - "I'm never
+going to be done" is the accurate way to describe that experience, not an
+exaggeration of it. Studying now only ever happens by tapping one lesson on
+the path; `startSession({ lexemeIds })` was already properly scoped to that
+lesson (a leftover from the Practice tab it replaced), so the fix was UI, not
+scheduling - see the lesson-preview decision below. Answers still count for
+scheduling, and still stay inside that lesson: one card per word, capped by
+the session length, so a six-word lesson can add at most six cards.
+
+**Tapping a lesson previews it before it starts.** `LessonPreview.tsx` shows
+a few sample words, how many are due, stuck (leeches) and genuinely
+not-yet-started, and how many new words *this specific round* would
+introduce - two different numbers, since "not started" is uncapped but the
+round obeys `maxNew` same as any session. "Not started" is computed word by
+word (every card for that word still in FSRS state 0), not read off
+`buildSession`'s `stats.newAvailable` - that field counts *cards*, and a
+half-started word can have newly unlocked tier-2 cards sitting fresh without
+being a new word to anyone looking at the lesson. The preview calls
+`previewSession` (no scheduling effect) and only actually starts the session
+when Start is pressed - tapping a lesson is safe to back out of.
 
 **Word identity ignores niqqud** — it's (consonantal spelling + part of speech
 + optional `key:`). That's what lets you retranslate, add vowel points, or move
@@ -201,9 +241,14 @@ words of an earlier lesson and split it on the path — `orderCustomWords`
 groups by first-appearance instead, so a lesson stays one lesson no matter
 what order you add to it in.
 
-**New words are withheld above 80 due cards.** The failure mode that kills SRS
-habits is opening the app to a 400-card wall, and it's self-inflicted by
-introducing new material while already behind.
+**New words are withheld above 80 due cards** *within whatever `buildSession`
+was scoped to.* Written when sessions still spanned the whole course; now
+that studying is always one lesson at a time (see above), the backlog this
+counts is that lesson's own, which - capped at 8 words by `packLessons` -
+essentially never reaches 80. The throttle isn't wrong, it's just dormant
+under the current UI; it would matter again for any future whole-course
+queue (an optimizer training pass, say), which is why it's still here rather
+than deleted.
 
 **Timestamps are epoch milliseconds, never `Date`.** Dates don't survive
 IndexedDB round-trips or JSON export cleanly, and shared mutable Dates are a
@@ -344,21 +389,24 @@ for the user — see item 1 below.
 
 Working: content pipeline with validation and markdown-table support, FSRS-6
 scheduling, card generation with tier gating, leech detection, the full gym
-escalation, session queue with a settable length, an unlocked path where
-tapping any lesson studies it directly, a Settings word list to remove or add
-words and lessons (search-filterable, non-destructive), Extras (writing
-practice + mnemonics), three exercises (flashcard / typing with an on-screen
-Hebrew keyboard / matching), mnemonic builder with a worked example, backup
-export/import, local persistence, GitHub Pages deployment.
+escalation, an unlocked path where tapping any lesson previews then studies
+it (never the whole course at once - there is no global Study button), a
+Settings word list to remove or add words and lessons (search-filterable,
+non-destructive), Extras (writing practice + mnemonics), three exercises
+(flashcard / typing with an on-screen Hebrew keyboard / matching), mnemonic
+builder with a worked example, backup export/import, local persistence,
+GitHub Pages deployment.
 
-A note on the session cap, measured rather than assumed. Running the real
-`buildSession` loop over the actual 204-word course for 200 days, answering
-every card with no Easy ratings and no rest days, the steady-state daily load
-once caught up is about 12 cards. A cap of 12 therefore holds a standing
-backlog of roughly 70 indefinitely; the backlog clears completely at 18 and
-above, where typical days still come out around 12 cards. The default is 12
-because a short sitting was the explicit request, but 20 is the setting that
-lets the course finish.
+A note on the session cap (`maxItems`, settable in Settings), measured back
+when it applied to the whole course rather than one lesson at a time. Running
+the real `buildSession` loop over the actual 204-word course for 200 days,
+answering every card with no Easy ratings and no rest days, the steady-state
+daily load once caught up was about 12 cards - a whole-course cap of 12 would
+hold a standing backlog of roughly 70 indefinitely, clearing completely at 18
+and above. That measurement doesn't describe today's UI (a lesson, capped at
+8 words, never gets near 12 anyway - see "no global Study button" above), but
+the number is kept here for whichever future whole-course queue reintroduces
+the question - a training pass for the FSRS optimizer, say.
 
 Next, roughly in order:
 

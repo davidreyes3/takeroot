@@ -64,6 +64,13 @@ describe('assessLeech', () => {
     expect(v).toMatchObject({ isLeech: true, reason: 'again_streak' });
   });
 
+  it('flags a card on two Agains in a row, not three', () => {
+    // Missing the same card twice in one sitting is already good evidence,
+    // not something that should need a third failure to act on.
+    expect(assessLeech(card({ againStreak: 2 }), []).isLeech).toBe(true);
+    expect(assessLeech(card({ againStreak: 1 }), []).isLeech).toBe(false);
+  });
+
   it('flags a card that has accumulated lapses', () => {
     const v = assessLeech(card({ fsrs: { ...card().fsrs, lapses: 4 } }), []);
     expect(v).toMatchObject({ isLeech: true, reason: 'lapses' });
@@ -87,6 +94,26 @@ describe('assessLeech', () => {
 
   it('never flags a suspended card', () => {
     expect(assessLeech(card({ suspended: true, againStreak: 9 }), []).isLeech).toBe(false);
+  });
+
+  it('combines lapses with the opposite-direction card when given a companion count', () => {
+    // Neither direction alone has reached the threshold of 4, but a word
+    // forgotten twice reading it and twice producing it has been forgotten
+    // four times - it shouldn't matter which direction failed.
+    const v = assessLeech(card({ fsrs: { ...card().fsrs, lapses: 2 } }), [], DEFAULT_LEECH_POLICY, 2);
+    expect(v).toMatchObject({ isLeech: true, reason: 'lapses', totalLapses: 4 });
+  });
+
+  it('does not combine lapses when no companion count is given', () => {
+    const v = assessLeech(card({ fsrs: { ...card().fsrs, lapses: 2 } }), []);
+    expect(v.isLeech).toBe(false);
+    expect(v.totalLapses).toBe(2);
+  });
+
+  it('reports total lapses even on a healthy card, for callers that want it', () => {
+    const v = assessLeech(card({ fsrs: { ...card().fsrs, lapses: 1 } }), [], DEFAULT_LEECH_POLICY, 1);
+    expect(v.isLeech).toBe(false);
+    expect(v.totalLapses).toBe(2);
   });
 
   it('reports severity in [0, 1]', () => {
@@ -199,6 +226,32 @@ describe('buildGymPlan', () => {
       matchingPoolIds: fillers,
     });
     expect(severe.steps.some((s) => s.kind === 'mnemonic')).toBe(true);
+  });
+
+  it('offers the mnemonic on combined lapses even when severity alone would not ask for it', () => {
+    // Severity here (0.2) is well under the 0.5 that would trigger a
+    // mnemonic on its own, and this card's *own* lapses (1) are under the
+    // old threshold of 3 too - but totalLapses, combining both recognition
+    // directions, has reached 3. It shouldn't matter which direction failed.
+    const plan = buildGymPlan({
+      card: card({ fsrs: { ...card().fsrs, lapses: 1 } }),
+      lexeme,
+      verdict: { isLeech: true, reason: 'again_streak', severity: 0.2, totalLapses: 3 },
+      fillerCardIds: fillers,
+      matchingPoolIds: fillers,
+    });
+    expect(plan.steps.some((s) => s.kind === 'mnemonic')).toBe(true);
+  });
+
+  it('falls back to the card\'s own lapses when a hand-built verdict has no totalLapses', () => {
+    const plan = buildGymPlan({
+      card: card({ fsrs: { ...card().fsrs, lapses: 3 } }),
+      lexeme,
+      verdict: { isLeech: true, reason: 'again_streak', severity: 0.2 },
+      fillerCardIds: fillers,
+      matchingPoolIds: fillers,
+    });
+    expect(plan.steps.some((s) => s.kind === 'mnemonic')).toBe(true);
   });
 
   it('does not ask for a mnemonic the word already has', () => {

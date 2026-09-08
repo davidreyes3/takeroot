@@ -24,7 +24,14 @@
  * that drift apart.
  */
 
-import { assessLeech, buildGymPlan, DEFAULT_LEECH_POLICY, type GymPlan, type LeechPolicy } from './leech.js';
+import {
+  assessLeech,
+  buildGymPlan,
+  DEFAULT_LEECH_POLICY,
+  type GymPlan,
+  type LeechPolicy,
+  type LeechVerdict,
+} from './leech.js';
 import { isUnlocked } from './cards.js';
 import type { Card, CardTemplate, ExerciseKind, Lexeme, ReviewLog } from './types.js';
 
@@ -137,6 +144,24 @@ function struggleScore(card: Card): number {
 }
 
 /**
+ * Lapses on this card's opposite-direction recognition sibling, if it has
+ * one - recall_he_en's is recall_en_he and vice versa. Fed to `assessLeech`
+ * so a word failed from both directions is caught even though neither card
+ * alone has reached the threshold; see the comment there. Any other template
+ * (typing, cloze, the form drills) has no such counterpart and gets 0.
+ */
+function companionLapses(card: Card, cardById: ReadonlyMap<string, Card>): number {
+  const other =
+    card.template === 'recall_he_en'
+      ? 'recall_en_he'
+      : card.template === 'recall_en_he'
+        ? 'recall_he_en'
+        : null;
+  if (!other) return 0;
+  return cardById.get(`${card.lexemeId}:${other}`)?.fsrs.lapses ?? 0;
+}
+
+/**
  * Is this word shaky enough to be worth drilling?
  *
  * FSRS difficulty centres around 5, so "harder than average" is the 5.5 line.
@@ -194,9 +219,18 @@ export function buildSession(input: BuildSessionInput): SessionPlan {
   // typing off cannot be asked to close a gym that way.
   const typedFinalTest = !disabled.has('type_he');
 
+  // Looked up by id (`${lexemeId}:${template}`) to find each recognition
+  // card's opposite-direction sibling - see companionLapses.
+  const cardById = new Map(active.map((c) => [c.id, c]));
+
   const due: Card[] = [];
   const leeches: Card[] = [];
   const fresh: Card[] = [];
+  // Reused when building each leech's gym plan below, so the verdict that
+  // decided a card belongs in the gym is exactly the one the plan is built
+  // from - assessLeech is never called twice for the same card with a
+  // chance of disagreeing with itself.
+  const verdictByCardId = new Map<string, LeechVerdict>();
 
   for (const card of queueable) {
     if (card.fsrs.state === 0) {
@@ -205,13 +239,26 @@ export function buildSession(input: BuildSessionInput): SessionPlan {
     }
     if (card.fsrs.due > now) continue;
 
-    const verdict = assessLeech(card, logsByCard.get(card.id) ?? [], policy);
+    const verdict = assessLeech(
+      card,
+      logsByCard.get(card.id) ?? [],
+      policy,
+      companionLapses(card, cardById),
+    );
+    verdictByCardId.set(card.id, verdict);
     if (verdict.isLeech) leeches.push(card);
     else due.push(card);
   }
 
   due.sort((a, b) => a.fsrs.due - b.fsrs.due);
-  leeches.sort((a, b) => b.fsrs.lapses - a.fsrs.lapses);
+  // Combined lapses when available (a word failed from both directions
+  // should outrank one failed from only one), falling back to the card's own
+  // count for the rare case a card enters here without a stored verdict.
+  leeches.sort(
+    (a, b) =>
+      (verdictByCardId.get(b.id)?.totalLapses ?? b.fsrs.lapses) -
+      (verdictByCardId.get(a.id)?.totalLapses ?? a.fsrs.lapses),
+  );
 
   // New words follow the path: by unit, then by the order they appear in the
   // content file, so the sequence you author is the sequence you learn.
@@ -320,7 +367,10 @@ export function buildSession(input: BuildSessionInput): SessionPlan {
       ),
     ].map((c) => c.id);
 
-    const verdict = assessLeech(card, logsByCard.get(card.id) ?? [], policy);
+    // Every card in `leeches` got a verdict when the queue was classified
+    // above; reusing it means the plan is built from the exact judgement
+    // that put the card here, not a fresh (and possibly different) one.
+    const verdict = verdictByCardId.get(card.id)!;
     const plan = buildGymPlan({
       card,
       lexeme,
