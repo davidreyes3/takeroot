@@ -38,6 +38,7 @@ import {
   customWordToLexeme,
   makeCustomWord,
   orderCustomWords,
+  resolvePos,
   validateCustomWord,
   type AddCustomWordInput,
 } from './customWords.js';
@@ -330,7 +331,7 @@ export const useApp = create<AppState>((set, get) => ({
     if (error) return { ok: false, error };
 
     const state = get();
-    const id = lexemeId(input.lemma, input.pos);
+    const id = lexemeId(input.lemma, resolvePos(input.pos));
     if (state.lexemes.some((l) => l.id === id)) {
       return { ok: false, error: 'This word is already in your course.' };
     }

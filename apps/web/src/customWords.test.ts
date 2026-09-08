@@ -4,7 +4,9 @@ import {
   customWordToLexeme,
   makeCustomWord,
   orderCustomWords,
+  resolvePos,
   validateCustomWord,
+  DEFAULT_POS,
   type CustomWord,
 } from './customWords.js';
 
@@ -84,6 +86,22 @@ describe('validateCustomWord', () => {
   it('rejects a blank lesson name', () => {
     expect(validateCustomWord({ ...valid, group: '  ' }, hasHebrew)).not.toBeNull();
   });
+
+  it('accepts a word with no part of speech at all - it is optional', () => {
+    const { pos: _pos, ...withoutPos } = valid;
+    expect(validateCustomWord(withoutPos, hasHebrew)).toBeNull();
+  });
+});
+
+describe('resolvePos', () => {
+  it('defaults to noun when nothing was chosen', () => {
+    expect(resolvePos(undefined)).toBe(DEFAULT_POS);
+    expect(DEFAULT_POS).toBe('noun');
+  });
+
+  it('keeps an explicit choice', () => {
+    expect(resolvePos('verb')).toBe('verb');
+  });
 });
 
 describe('customWordToLexeme', () => {
@@ -110,5 +128,15 @@ describe('makeCustomWord', () => {
     expect(w.lemmaBare).toBe('קטן');
     expect(w.translit).toBe('katan');
     expect(w.group).toBe('Adjectives');
+  });
+
+  it('defaults to noun when no part of speech was given', () => {
+    const w = makeCustomWord('lx_x', {
+      lemma: 'מחשב',
+      translit: '',
+      glosses: ['computer'],
+      group: 'Technology',
+    });
+    expect(w.pos).toBe('noun');
   });
 });

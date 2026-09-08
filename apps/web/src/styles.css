@@ -395,6 +395,22 @@ input { font: inherit; }
 
 .summary-row input[type="checkbox"] { accent-color: var(--accent); width: 18px; height: 18px; flex: none; }
 
+/*
+ * Pinned to the top of the viewport once scrolled there, so a shrinking
+ * result list beneath it (typing narrows the word list a lot) can't push it
+ * around or out from under an on-screen keyboard - see WordListManager.tsx.
+ * The background stops the list scrolling underneath it from showing through.
+ */
+.sticky-search {
+  position: sticky;
+  top: env(safe-area-inset-top);
+  z-index: 5;
+  background: var(--bg);
+  padding: 10px 0;
+  margin: 0 -20px;
+  padding-inline: 20px;
+}
+
 /* --- agreement table ---------------------------------------------------- */
 
 .forms { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; width: 100%; }

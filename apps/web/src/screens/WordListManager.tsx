@@ -107,7 +107,16 @@ export function WordListManager({ lexemes, unitTitles }: WordListManagerProps) {
     <div className="stack">
       <AddWordForm existingLessons={existingLessons} />
 
-      <div className="field">
+      {/*
+        Pinned rather than plain document flow. Typing narrows the list below
+        it a lot - on a phone, with the on-screen keyboard already covering
+        half the screen, a shrinking list changes the page's height under
+        your thumb while you're still typing, which can shove this input out
+        from under the keyboard's top edge or off-screen entirely. Sticky
+        keeps it exactly where you scrolled it to, however much the results
+        below it grow or shrink.
+      */}
+      <div className="field sticky-search">
         <label htmlFor="word-search">Search your words</label>
         <input
           id="word-search"
@@ -194,7 +203,7 @@ function AddWordForm({ existingLessons }: { existingLessons: string[] }) {
   const [lemma, setLemma] = useState('');
   const [translit, setTranslit] = useState('');
   const [english, setEnglish] = useState('');
-  const [pos, setPos] = useState<Pos>('noun');
+  const [pos, setPos] = useState<Pos | ''>('');
   const [group, setGroup] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -212,7 +221,7 @@ function AddWordForm({ existingLessons }: { existingLessons: string[] }) {
       .map((s) => s.trim())
       .filter(Boolean);
 
-    const result = await addCustomWord({ lemma, translit, glosses, pos, group });
+    const result = await addCustomWord({ lemma, translit, glosses, group, ...(pos ? { pos } : {}) });
     if (!result.ok) {
       setError(result.error);
       return;
@@ -268,8 +277,9 @@ function AddWordForm({ existingLessons }: { existingLessons: string[] }) {
       </div>
 
       <div className="field">
-        <label htmlFor="new-word-pos">Part of speech</label>
-        <select id="new-word-pos" value={pos} onChange={(e) => setPos(e.target.value as Pos)}>
+        <label htmlFor="new-word-pos">Part of speech (optional)</label>
+        <select id="new-word-pos" value={pos} onChange={(e) => setPos(e.target.value as Pos | '')}>
+          <option value="">Not sure - defaults to noun</option>
           {POS_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}

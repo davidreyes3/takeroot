@@ -496,11 +496,68 @@ describe('adding words and lessons', () => {
   });
 });
 
+describe('Settings tabs', () => {
+  it('shows General settings by default, not the word list', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: 'Settings' }));
+
+    expect(await screen.findByText('Cards per session')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Search your words')).toBeNull();
+  });
+
+  it('switches to the word list without losing the general settings', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: 'Settings' }));
+    await user.click(await screen.findByRole('button', { name: 'Word list' }));
+
+    expect(await screen.findByLabelText('Search your words')).toBeInTheDocument();
+    expect(screen.queryByText('Cards per session')).toBeNull();
+
+    await user.click(await screen.findByRole('button', { name: 'General' }));
+    expect(await screen.findByText('Cards per session')).toBeInTheDocument();
+  });
+});
+
+describe('adding a word without a part of speech', () => {
+  it('defaults to noun rather than blocking the add', async () => {
+    await useApp.getState().init();
+    const result = await useApp.getState().addCustomWord({
+      lemma: 'מחשב',
+      translit: '',
+      glosses: ['computer'],
+      group: 'Technology',
+    });
+    expect(result.ok).toBe(true);
+
+    const added = useApp.getState().lexemes.find((l) => l.lemmaBare === 'מחשב');
+    expect(added?.pos).toBe('noun');
+  });
+
+  it('lets the form be submitted with "Not sure" left selected', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole('button', { name: 'Settings' }));
+    await user.click(await screen.findByRole('button', { name: 'Word list' }));
+
+    await user.type(screen.getByLabelText('Hebrew'), 'מחשב');
+    await user.type(screen.getByLabelText('English meaning(s)'), 'computer');
+    await user.type(screen.getByLabelText('Lesson'), 'Technology');
+    await user.click(await screen.findByRole('button', { name: 'Add word' }));
+
+    expect(await screen.findByText(/Added מחשב/)).toBeInTheDocument();
+    const added = useApp.getState().lexemes.find((l) => l.lemmaBare === 'מחשב');
+    expect(added?.pos).toBe('noun');
+  });
+});
+
 describe('the word list in Settings', () => {
   it('narrows the visible words as you type, without removing anything', async () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(await screen.findByRole('button', { name: 'Settings' }));
+    await user.click(await screen.findByRole('button', { name: 'Word list' }));
 
     const before = await screen.findAllByRole('checkbox');
     await user.type(screen.getByLabelText('Search your words'), 'small');
@@ -517,6 +574,7 @@ describe('the word list in Settings', () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(await screen.findByRole('button', { name: 'Settings' }));
+    await user.click(await screen.findByRole('button', { name: 'Word list' }));
 
     await user.type(screen.getByLabelText('Search your words'), 'small');
     const katan = useApp.getState().lexemes.find((l) => l.lemmaBare === 'קטן')!;

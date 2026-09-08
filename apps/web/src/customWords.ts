@@ -31,8 +31,24 @@ export interface AddCustomWordInput {
   lemma: string;
   translit: string;
   glosses: string[];
-  pos: Pos;
+  /** Left unset when the learner doesn't know or doesn't care - see `resolvePos`. */
+  pos?: Pos;
   group: string;
+}
+
+/**
+ * Part of speech is the one field on the add-a-word form that isn't obvious
+ * to someone who isn't already thinking grammatically - most people adding a
+ * word know the Hebrew and the meaning, not whether it's a "particle". Rather
+ * than block on a guess, an unset choice quietly becomes a noun: it's the
+ * most common category, and the only consequence is losing the adjective
+ * agreement cards a real `adj` tag would have unlocked, which the learner can
+ * always fix by re-adding the word with a part of speech once they know it.
+ */
+export const DEFAULT_POS: Pos = 'noun';
+
+export function resolvePos(pos: Pos | undefined): Pos {
+  return pos ?? DEFAULT_POS;
 }
 
 /** Turn a candidate input into a validated record, or say what's wrong. */
@@ -84,7 +100,7 @@ export function makeCustomWord(id: string, input: AddCustomWordInput): CustomWor
     lemmaBare: stripNiqqud(input.lemma.trim()),
     translit: input.translit.trim(),
     glosses: input.glosses,
-    pos: input.pos,
+    pos: resolvePos(input.pos),
     group: input.group.trim(),
     createdAt: Date.now(),
   };
