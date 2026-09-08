@@ -238,7 +238,11 @@ describe('the path', () => {
     // Nothing has been studied, so this would have been locked under the old
     // rule. It opens anyway - see buildPath.
     await user.click(nodes[nodes.length - 1]!);
+    await user.click(await screen.findByRole('button', { name: /^start/i }));
 
+    // Wait for the session screen - startSession's work (including a DB
+    // read) is still async at the point the Start click resolves.
+    await screen.findByRole('button', { name: 'Leave' });
     const plan = useApp.getState().plan!;
     expect(plan.items.length).toBeGreaterThan(0);
 
@@ -259,14 +263,73 @@ describe('the path', () => {
 
     const nodes = await screen.findAllByRole('button', { name: /% mastered/ });
     await user.click(nodes[0]!);
+    await user.click(await screen.findByRole('button', { name: /^start/i }));
 
+    // Wait for the session screen before reading `plan` off the store -
+    // startSession's work (including a DB read) is still async at the
+    // point the Start click resolves.
+    await screen.findByRole('button', { name: /show answer/i });
     const cardId = useApp.getState().plan!.items[0]!.cardId;
-    await user.click(await screen.findByRole('button', { name: /show answer/i }));
+    await user.click(screen.getByRole('button', { name: /show answer/i }));
     await user.click(screen.getByText('Good'));
 
     expect(useApp.getState().cards.get(cardId)!.fsrs.state).not.toBe(0);
     const logs = await db.logs.where('cardId').equals(cardId).toArray();
     expect(logs[0]?.countsForScheduling).toBe(true);
+  });
+});
+
+describe('the lesson preview', () => {
+  it('shows what tapping a lesson will study before starting it, and does not start on its own', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const nodes = await screen.findAllByRole('button', { name: /% mastered/ });
+    await user.click(nodes[0]!);
+
+    // Still on the preview: no session has started yet.
+    expect(useApp.getState().plan).toBeNull();
+    expect(await screen.findByRole('button', { name: /^start/i })).toBeInTheDocument();
+    expect(screen.getByText(/mastered/)).toBeInTheDocument();
+    expect(screen.getByText('due')).toBeInTheDocument();
+    expect(screen.getByText('stuck')).toBeInTheDocument();
+    expect(screen.getByText('new')).toBeInTheDocument();
+  });
+
+  it('goes back to the path without starting anything', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const nodes = await screen.findAllByRole('button', { name: /% mastered/ });
+    await user.click(nodes[0]!);
+    await user.click(await screen.findByRole('button', { name: 'Back' }));
+
+    expect(useApp.getState().plan).toBeNull();
+    expect(await screen.findAllByRole('button', { name: /% mastered/ })).not.toHaveLength(0);
+  });
+
+  it('never pulls in a word from a different lesson', async () => {
+    // The regression this exists for: studying one lesson pulling in due
+    // cards from an unrelated one, because the old flow studied from the
+    // whole course's backlog rather than the tapped lesson alone.
+    const user = userEvent.setup();
+    render(<App />);
+
+    // Wait for the path to actually render before reading store state off
+    // it - init() is still running asynchronously right after render().
+    const buttons = await screen.findAllByRole('button', { name: /% mastered/ });
+    const { lexemes, cards } = useApp.getState();
+    const first = buildPath(lexemes, cards)[0]!;
+    const firstIds = new Set(first.lexemes.map((l) => l.id));
+
+    await user.click(buttons[0]!);
+    await user.click(await screen.findByRole('button', { name: /^start/i }));
+    // The session screen only renders once `plan` is set, so waiting for it
+    // guarantees the read below isn't racing startSession's async work.
+    await screen.findByRole('button', { name: /show answer/i });
+
+    const plan = useApp.getState().plan!;
+    expect(plan.items.every((i) => firstIds.has(i.lexemeId))).toBe(true);
   });
 });
 
@@ -704,18 +767,22 @@ describe('backup', () => {
 });
 
 describe('rendering', () => {
-  it('shows the path and a study button', async () => {
+  it('shows the path, with no global study button', async () => {
     render(<App />);
     expect(await screen.findByRole('heading', { name: 'Hebrew' })).toBeInTheDocument();
-    const study = await screen.findByRole('button', { name: /study/i });
-    expect(study).toBeEnabled();
+    // Studying happens by tapping a lesson now - there is no button that
+    // pulls from the whole course's backlog at once.
+    expect(screen.queryByRole('button', { name: /^study$/i })).toBeNull();
+    expect(await screen.findAllByRole('button', { name: /% mastered/ })).not.toHaveLength(0);
   });
 
   it('starts a session and shows a card you can answer', async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: /study/i }));
+    const nodes = await screen.findAllByRole('button', { name: /% mastered/ });
+    await user.click(nodes[0]!);
+    await user.click(await screen.findByRole('button', { name: /^start/i }));
     await user.click(await screen.findByRole('button', { name: /show answer/i }));
 
     // All four FSRS ratings, with their intervals.
@@ -730,7 +797,10 @@ describe('rendering', () => {
   it('renders Hebrew right-to-left and marks its language', async () => {
     const user = userEvent.setup();
     const { container } = render(<App />);
-    await user.click(await screen.findByRole('button', { name: /study/i }));
+
+    const nodes = await screen.findAllByRole('button', { name: /% mastered/ });
+    await user.click(nodes[0]!);
+    await user.click(await screen.findByRole('button', { name: /^start/i }));
 
     const hebrew = container.querySelector('bdi.he');
     expect(hebrew).not.toBeNull();

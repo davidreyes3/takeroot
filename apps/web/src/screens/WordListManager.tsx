@@ -107,16 +107,7 @@ export function WordListManager({ lexemes, unitTitles }: WordListManagerProps) {
     <div className="stack">
       <AddWordForm existingLessons={existingLessons} />
 
-      {/*
-        Pinned rather than plain document flow. Typing narrows the list below
-        it a lot - on a phone, with the on-screen keyboard already covering
-        half the screen, a shrinking list changes the page's height under
-        your thumb while you're still typing, which can shove this input out
-        from under the keyboard's top edge or off-screen entirely. Sticky
-        keeps it exactly where you scrolled it to, however much the results
-        below it grow or shrink.
-      */}
-      <div className="field sticky-search">
+      <div className="field">
         <label htmlFor="word-search">Search your words</label>
         <input
           id="word-search"
@@ -128,62 +119,73 @@ export function WordListManager({ lexemes, unitTitles }: WordListManagerProps) {
         />
       </div>
 
-      {filtered.length === 0 && (
-        <p className="muted">No words match "{query}".</p>
-      )}
+      {/*
+        Its own scroll region, not plain document flow. Typing narrows the
+        list a lot, and on a phone - with the on-screen keyboard already
+        covering half the screen - a shrinking *page* height mid-word can
+        force the browser to scroll the whole document, taking the search box
+        (and the keyboard's relationship to it) with it. Fixed height plus its
+        own overflow means the list can go from 200 results to 1 without the
+        page around it moving at all - only this box's internal scroll
+        position changes, and the search input above it never does.
+      */}
+      <div className="word-list-results">
+        {filtered.length === 0 && <p className="muted">No words match "{query}".</p>}
 
-      {filtered.map(({ unit, groups }) => (
-        <section key={unit} className="unit">
-          <div className="unit-head">
-            <h2>{unitTitles.get(unit) ?? `Unit ${unit}`}</h2>
-          </div>
+        {filtered.map(({ unit, groups }) => (
+          <section key={unit} className="unit">
+            <div className="unit-head">
+              <h2>{unitTitles.get(unit) ?? `Unit ${unit}`}</h2>
+            </div>
 
-          {groups.map((group) => {
-            // A lesson still hidden from the filtered word list can still be
-            // toggled as a whole - the button always acts on every word in
-            // the lesson, not merely the ones the search happens to show.
-            const allWords = unitGroups.find((u) => u.unit === unit)?.groups.find((g) => g.name === group.name)
-              ?.words ?? group.words;
-            const allExcluded = allWords.every((w) => excludedLexemeIds.has(w.id));
+            {groups.map((group) => {
+              // A lesson still hidden from the filtered word list can still be
+              // toggled as a whole - the button always acts on every word in
+              // the lesson, not merely the ones the search happens to show.
+              const allWords =
+                unitGroups.find((u) => u.unit === unit)?.groups.find((g) => g.name === group.name)?.words ??
+                group.words;
+              const allExcluded = allWords.every((w) => excludedLexemeIds.has(w.id));
 
-            return (
-              <div key={group.name} className="stack" style={{ marginBottom: 14 }}>
-                <div className="row" style={{ justifyContent: 'space-between' }}>
-                  <div className="lesson-label">
-                    {group.name} ({allWords.length - allWords.filter((w) => excludedLexemeIds.has(w.id)).length}/
-                    {allWords.length})
+              return (
+                <div key={group.name} className="stack" style={{ marginBottom: 14 }}>
+                  <div className="row" style={{ justifyContent: 'space-between' }}>
+                    <div className="lesson-label">
+                      {group.name} ({allWords.length - allWords.filter((w) => excludedLexemeIds.has(w.id)).length}/
+                      {allWords.length})
+                    </div>
+                    <button
+                      className="pill pressable"
+                      onClick={() => void setLexemesExcluded(allWords.map((w) => w.id), !allExcluded)}
+                    >
+                      {allExcluded ? 'Restore lesson' : 'Remove lesson'}
+                    </button>
                   </div>
-                  <button
-                    className="pill pressable"
-                    onClick={() => void setLexemesExcluded(allWords.map((w) => w.id), !allExcluded)}
-                  >
-                    {allExcluded ? 'Restore lesson' : 'Remove lesson'}
-                  </button>
-                </div>
 
-                {group.words.map((word) => {
-                  const excluded = excludedLexemeIds.has(word.id);
-                  return (
-                    <label key={word.id} className="summary-row">
-                      <span className="row">
-                        <input
-                          type="checkbox"
-                          checked={!excluded}
-                          onChange={(e) => void setLexemeExcluded(word.id, !e.target.checked)}
-                          aria-label={`Study ${word.lemma}`}
-                        />
-                        <Word text={word.lemma} hebrew />
-                        <span className="muted">{word.glosses[0]}</span>
-                      </span>
-                      {excluded && <span className="tag">removed</span>}
-                    </label>
-                  );
-                })}
-              </div>
-            );
-          })}
-        </section>
-      ))}
+                  {group.words.map((word) => {
+                    const excluded = excludedLexemeIds.has(word.id);
+                    return (
+                      <label key={word.id} className="summary-row">
+                        <span className="row">
+                          <input
+                            type="checkbox"
+                            checked={!excluded}
+                            onChange={(e) => void setLexemeExcluded(word.id, !e.target.checked)}
+                            aria-label={`Study ${word.lemma}`}
+                          />
+                          <Word text={word.lemma} hebrew />
+                          <span className="muted">{word.glosses[0]}</span>
+                        </span>
+                        {excluded && <span className="tag">removed</span>}
+                      </label>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </section>
+        ))}
+      </div>
     </div>
   );
 }

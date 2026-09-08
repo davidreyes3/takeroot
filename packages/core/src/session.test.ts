@@ -551,6 +551,67 @@ describe('the gym drills a word from both directions', () => {
   });
 });
 
+describe('a word forgotten from both directions', () => {
+  // recall_he_en and recall_en_he each carry their own lapse count. A word
+  // failed twice reading it and twice producing it has been forgotten four
+  // times - it shouldn't matter which direction it happened on.
+  function recognitionCard(lexemeId: string, template: 'recall_he_en' | 'recall_en_he', lapses: number): Card {
+    const base = newCard(lexemeId, template, T0);
+    return {
+      ...base,
+      fsrs: { ...base.fsrs, state: 2, stability: 5, difficulty: 5, reps: 5, due: T0 - DAY, lapses },
+    };
+  }
+
+  it('enters the gym once the two directions combined reach the lapse threshold', () => {
+    const lexemes = [lexeme('lx_both')];
+    const heEn = recognitionCard('lx_both', 'recall_he_en', 2);
+    const enHe = recognitionCard('lx_both', 'recall_en_he', 2);
+
+    const plan = buildSession({
+      cards: [heEn, enHe],
+      lexemes,
+      logsByCard: noLogs,
+      now: T0,
+      config: { warmUpCount: 0 },
+    });
+
+    expect(plan.items.some((i) => i.kind === 'gym')).toBe(true);
+  });
+
+  it('stays an ordinary review when the combined total still falls short', () => {
+    const lexemes = [lexeme('lx_both')];
+    const heEn = recognitionCard('lx_both', 'recall_he_en', 1);
+    const enHe = recognitionCard('lx_both', 'recall_en_he', 1);
+
+    const plan = buildSession({
+      cards: [heEn, enHe],
+      lexemes,
+      logsByCard: noLogs,
+      now: T0,
+      config: { warmUpCount: 0 },
+    });
+
+    expect(plan.items.some((i) => i.kind === 'gym')).toBe(false);
+  });
+
+  it('does not borrow lapses from an unrelated word', () => {
+    const lexemes = [lexeme('lx_a'), lexeme('lx_b')];
+    const a = recognitionCard('lx_a', 'recall_he_en', 2);
+    const b = recognitionCard('lx_b', 'recall_en_he', 2);
+
+    const plan = buildSession({
+      cards: [a, b],
+      lexemes,
+      logsByCard: noLogs,
+      now: T0,
+      config: { warmUpCount: 0 },
+    });
+
+    expect(plan.items.some((i) => i.kind === 'gym')).toBe(false);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Session size, template filtering and per-lesson practice.
 // ---------------------------------------------------------------------------

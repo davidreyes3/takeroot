@@ -36,7 +36,11 @@ export const DEFAULT_LEECH_POLICY: LeechPolicy = {
   // struggling word early is cheap, whereas eight failed reviews is weeks of
   // frustration for a word you still cannot read.
   lapseThreshold: 4,
-  againStreakThreshold: 3,
+  // Two Agains in a row, not three. Missing the same card twice in one
+  // sitting is already good evidence you don't know it yet - waiting for a
+  // third failure before offering help is making someone prove they're
+  // struggling before the app will act on it.
+  againStreakThreshold: 2,
   window: 6,
   accuracyThreshold: 0.6,
 };
@@ -48,6 +52,12 @@ export interface LeechVerdict {
   reason?: LeechReason;
   /** 0..1, how badly the card is doing. Drives how far up the gym it starts. */
   severity: number;
+  /**
+   * This card's own lapses plus `companionLapses`, when a companion was
+   * given. Optional so a hand-built verdict (tests, mostly) still works
+   * without it - callers that care fall back to the card's own lapses.
+   */
+  totalLapses?: number;
 }
 
 /**
@@ -56,27 +66,40 @@ export interface LeechVerdict {
  * `recentLogs` should be that card's most recent logs, newest last. Only rows
  * with `countsForScheduling` are considered, so a bad run inside a drill does
  * not immediately re-flag a card the learner is already working on.
+ *
+ * `companionLapses` is the word's *other* recognition-direction card's lapse
+ * count, when there is one - recall_he_en's counterpart is recall_en_he and
+ * vice versa. Forgetting a word is forgetting it, whichever direction you
+ * were asked; a learner who fails "read it" twice and "produce it" twice has
+ * failed four times, even though neither card alone has reached the
+ * threshold. Left at 0 for a card with no such counterpart (type_he, cloze,
+ * the form-drill templates), which only ever judge themselves.
  */
 export function assessLeech(
   card: Card,
   recentLogs: readonly ReviewLog[],
   policy: LeechPolicy = DEFAULT_LEECH_POLICY,
+  companionLapses = 0,
 ): LeechVerdict {
-  if (card.suspended) return { isLeech: false, severity: 0 };
+  const totalLapses = card.fsrs.lapses + companionLapses;
+
+  if (card.suspended) return { isLeech: false, severity: 0, totalLapses };
 
   if (card.againStreak >= policy.againStreakThreshold) {
     return {
       isLeech: true,
       reason: 'again_streak',
       severity: Math.min(1, card.againStreak / (policy.againStreakThreshold * 2)),
+      totalLapses,
     };
   }
 
-  if (card.fsrs.lapses >= policy.lapseThreshold) {
+  if (totalLapses >= policy.lapseThreshold) {
     return {
       isLeech: true,
       reason: 'lapses',
-      severity: Math.min(1, card.fsrs.lapses / (policy.lapseThreshold * 2)),
+      severity: Math.min(1, totalLapses / (policy.lapseThreshold * 2)),
+      totalLapses,
     };
   }
 
@@ -89,11 +112,12 @@ export function assessLeech(
         isLeech: true,
         reason: 'low_accuracy',
         severity: Math.min(1, 1 - accuracy),
+        totalLapses,
       };
     }
   }
 
-  return { isLeech: false, severity: 0 };
+  return { isLeech: false, severity: 0, totalLapses };
 }
 
 // --- The gym ---------------------------------------------------------------
@@ -227,7 +251,12 @@ export function buildGymPlan(input: GymPlanInput): GymPlan {
     prompt: `Let's take another run at ${lexeme.lemma}. Read it, say it out loud, then we'll drill it.`,
   });
 
-  const wantsMnemonic = !lexeme.mnemonic && (verdict.severity >= 0.5 || card.fsrs.lapses >= 3);
+  // `totalLapses` folds in the word's other recognition-direction card when
+  // assessLeech was given one, so a word failed from both sides earns the
+  // mnemonic step even if neither card alone has 3 lapses. Falls back to this
+  // card's own count for a hand-built verdict that never set it.
+  const wantsMnemonic =
+    !lexeme.mnemonic && (verdict.severity >= 0.5 || (verdict.totalLapses ?? card.fsrs.lapses) >= 3);
   if (wantsMnemonic) {
     steps.push({
       kind: 'mnemonic',

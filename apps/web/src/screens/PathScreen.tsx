@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { Card, Lexeme } from '@lang/core';
 import { useApp } from '../store.js';
+import { LessonPreview } from './LessonPreview.js';
 
 /**
  * A lesson wants roughly this many words: enough to be worth opening, few
@@ -223,16 +224,26 @@ export function LessonPath({ nodes, unitTitles, onSelect }: LessonPathProps) {
 export function PathScreen({ lexemes, cards, unitTitles }: PathScreenProps) {
   const startSession = useApp((s) => s.startSession);
   const nodes = useMemo(() => buildPath(lexemes, cards), [lexemes, cards]);
+  const [previewing, setPreviewing] = useState<LessonNode | null>(null);
+
+  if (previewing) {
+    return (
+      <LessonPreview
+        node={previewing}
+        unitTitle={unitTitles.get(previewing.unit) ?? `Unit ${previewing.unit}`}
+        cards={cards}
+        onBack={() => setPreviewing(null)}
+        onStart={() => {
+          setPreviewing(null);
+          void startSession({ lexemeIds: previewing.lexemes.map((l) => l.id) });
+        }}
+      />
+    );
+  }
 
   return (
     <div className="path">
-      <LessonPath
-        nodes={nodes}
-        unitTitles={unitTitles}
-        onSelect={(node) => {
-          void startSession({ lexemeIds: node.lexemes.map((l) => l.id) });
-        }}
-      />
+      <LessonPath nodes={nodes} unitTitles={unitTitles} onSelect={setPreviewing} />
     </div>
   );
 }
