@@ -52,7 +52,8 @@ apps/web          React 19 + Vite 6 PWA, local-first
   store.ts          zustand. Coordinates; never decides.
   db.ts             Dexie, backup export/import, SyncAdapter seam
   face.ts           what each card template shows, front and back
-  screens/          PathScreen (+ packLessons, LessonPath, buildPath),
+  screens/          PathScreen (+ packLessons, buildPath, buildUnits,
+                    chooseOpenUnit, LessonPath),
                     LessonPreview, ExtrasScreen, WordListManager,
                     SessionScreen, SettingsScreen
   customWords.ts    words/lessons added in-app; merged into Lexeme[] at init
