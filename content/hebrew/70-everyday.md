@@ -23,6 +23,7 @@ so the agreement tables come from real data rather than being generated.
 | אין | ein | there is no, not have, not has | particle |
 | זה | ze | this, that, this is, it is, it, it's | pron |
 | זאת | zot | this, this is (feminine), that is (feminine) | pron |
+| צריך | tsarich | needs, need, have to, has to | adj |
 
 ## Time
 
