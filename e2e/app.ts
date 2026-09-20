@@ -32,31 +32,39 @@ export async function openSection(page: Page, name: string): Promise<void> {
 }
 
 /**
- * Study a lesson to the end of its round.
+ * Study a lesson to the end of its round, answering Good every time.
  *
- * The wait before the loop is the point of this helper. Looking for the
- * first card the instant after Start finds nothing, the loop exits having
- * answered nothing at all, and the run then looks exactly like a bug in the
- * app rather than a race in the test. That cost a round of false diagnosis
- * once already.
+ * Each pass waits for the next card *or* the summary, and only then decides
+ * which it is looking at. Asking whether a card is on screen without waiting
+ * first is the trap here: between one answer and the next render there is a
+ * moment where neither is present, so the loop exits mid-session, and the
+ * failure surfaces far away as "the summary never appeared". Both times that
+ * happened it looked like a bug in the app rather than a race in the test -
+ * once locally, once on a slower CI runner that a sleep would have papered
+ * over.
  */
 export async function studyLesson(page: Page, lesson: string): Promise<number> {
   await page.getByRole('button', { name: new RegExp(`^${lesson},`) }).click();
   await page.getByRole('button', { name: /^Start/ }).click();
-  await page.getByRole('button', { name: 'Show answer' }).waitFor();
+
+  const reveal = page.getByRole('button', { name: 'Show answer' });
+  const summary = page.getByRole('button', { name: 'Back to the path' });
 
   let answered = 0;
-  // Bounded rather than while(true): a session is capped, so a loop that
-  // does not end means something is wrong and the test should say so.
+  // Bounded rather than while(true): a session is capped, so a loop that does
+  // not end is itself a failure and should be reported as one.
   for (let i = 0; i < 40; i++) {
-    const reveal = page.getByRole('button', { name: 'Show answer' });
-    if ((await reveal.count()) === 0) break;
+    await expect(
+      reveal.or(summary),
+      'the session showed neither another card nor its summary',
+    ).toBeVisible();
+    if (await summary.isVisible()) break;
     await reveal.click();
     await page.getByRole('button', { name: /^Good/ }).click();
     answered++;
   }
 
-  await page.getByRole('button', { name: 'Back to the path' }).click();
+  await summary.click();
   await page.locator('.unit').first().waitFor();
   expect(answered, 'the session answered no cards at all').toBeGreaterThan(0);
   return answered;

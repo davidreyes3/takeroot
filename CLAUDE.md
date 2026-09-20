@@ -362,6 +362,15 @@ Three things about it are deliberate:
   no history at all the path opens on unit 1, which means "people" has no
   *Open* control to assert against — a closed section is any of the others.
 
+And one trap, which has now bitten twice: **never ask whether an element is
+present without waiting for it first.** Between answering one card and the
+next one rendering there is a moment where neither the card nor the summary
+is on screen, so a bare `count()` exits the loop mid-session and the failure
+surfaces somewhere else entirely, looking like an app bug. `studyLesson` in
+`e2e/app.ts` waits for `reveal.or(summary)` and only then decides which it is
+looking at. A sleep would paper over it; on a slower CI runner it would come
+straight back.
+
 ---
 
 ## Content authoring
