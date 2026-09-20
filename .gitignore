@@ -5,3 +5,9 @@ coverage/
 .DS_Store
 tsconfig.tsbuildinfo
 *.tsbuildinfo
+
+# Browser-test output: screenshots are for looking at, not for committing,
+# and a trace is only useful next to the run that produced it.
+e2e/shots/
+test-results/
+playwright-report/

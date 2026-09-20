@@ -20,8 +20,10 @@ several of those decisions look arbitrary until you know the reason.
 
 ```bash
 npm run dev            # http://localhost:5173  (port is pinned, see below)
-npm test               # 367 tests
+npm test               # 367 tests (vitest; does not include e2e)
 npm run test:watch
+npm run e2e            # 9 browser tests (Playwright; starts the server itself)
+npm run shots          # screenshots of the app -> e2e/shots/, gitignored
 npm run typecheck      # tsc -b across the workspace
 npm run content:check  # validate content/, report what the app had to guess
 npm run sim            # what each retention setting costs in daily reviews
@@ -60,6 +62,7 @@ apps/web          React 19 + Vite 6 PWA, local-first
   exercises/        Flashcard, TypeAnswer, Matching, GymRunner
   components/       Word, HebrewKeyboard, AgreementTable, MnemonicBuilder
 
+e2e/              Playwright. app.ts drives the app, *.spec.ts state the rules
 content/hebrew/   the user's vocabulary, as markdown tables (source of truth)
 docs/PLAN.md      design decisions and rationale
 docs/source-vocabulary.md   their original pasted list, archived unparsed
@@ -321,6 +324,7 @@ lesson-packing fix.
 | Integration (real Dexie via `fake-indexeddb`) | `apps/web/src/app.test.tsx` |
 | Component (Testing Library) | `apps/web/src/**/*.test.tsx` |
 | Architecture boundary | `packages/core/src/architecture.test.ts` |
+| Browser (real IndexedDB, real reload) | `e2e/*.spec.ts` |
 | Simulation, memory, performance guards | `packages/core/src/simulate.test.ts` |
 
 Conventions worth keeping:
@@ -335,6 +339,28 @@ Conventions worth keeping:
   (identical session from 6 log rows or 2,000), bounded output (5,000 cards in
   → ≤70 items out), sub-quadratic scaling, no mutation of inputs.
 - Don't assert on `issues[0]` positionally — filter by severity.
+
+**The browser layer earns its keep only where jsdom cannot reach.** `npm run
+e2e` is nine tests, not a second copy of the suite: a real session writing
+through Dexie into real IndexedDB and a real reload reading it back, plus the
+handful of things that are about a finger on a screen (tapping anywhere on a
+closed card, a header bar big enough to hit). Rules that can be stated about a
+pure function belong in `packages/core`; rules about rendered output belong in
+a Testing Library test. Both are faster and fail more legibly.
+
+Three things about it are deliberate:
+
+- **On a fresh checkout, `npx playwright install chromium` is needed once**
+  before `npm run e2e`. The npm dependency does not bring the browser binary,
+  and CI installs it as its own step.
+- **`npm run shots` produces screenshots to look at, not to compare against.**
+  Font rasterisation differs between a Windows machine and a CI runner, so a
+  committed pixel baseline fails for reasons that have nothing to do with the
+  app — and a tolerance wide enough to stop that is wide enough to miss the
+  defects worth catching. They go to `e2e/shots/`, gitignored.
+- **A spec gets a fresh browser context, so its IndexedDB starts empty.** With
+  no history at all the path opens on unit 1, which means "people" has no
+  *Open* control to assert against — a closed section is any of the others.
 
 ---
 
@@ -460,7 +486,7 @@ Next, roughly in order:
    Settings both work today (see the two decisions above) - what's still
    missing is folding a custom word into the real content file, and editing
    an existing authored word from inside the app at all.
-7. Playwright end-to-end and an accessibility pass.
+7. An accessibility pass. (Playwright is in place — see Testing.)
 
 Worth a review pass, and flagged to the user: the part-of-speech and lesson
 groupings in `content/hebrew/` were assigned mechanically, not by them. Known

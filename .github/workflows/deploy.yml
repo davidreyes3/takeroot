@@ -41,6 +41,17 @@ jobs:
       - name: Check content files
         run: npm run content:check
 
+      # The browser tests need a browser. Chromium only - see
+      # playwright.config.ts for why one is enough for this app.
+      - name: Install the test browser
+        run: npx playwright install --with-deps chromium
+
+      # Catches what jsdom cannot: a real session writing to real IndexedDB,
+      # and a real reload reading it back. Retries are configured, so a flaky
+      # browser cannot be the reason a good commit fails to publish.
+      - name: Browser tests
+        run: npm run e2e
+
       - name: Build
         run: npm run build
         env:

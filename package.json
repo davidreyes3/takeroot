@@ -12,11 +12,14 @@
     "build": "npm run build -w @lang/web",
     "test": "vitest run",
     "test:watch": "vitest",
+    "e2e": "playwright test",
+    "shots": "playwright test e2e/screenshots.spec.ts",
     "typecheck": "tsc -b --pretty",
     "content:check": "vite-node packages/core/src/content/validate-cli.ts content",
     "sim": "vite-node packages/core/src/simulate-cli.ts"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@testing-library/user-event": "^14.5.2",
