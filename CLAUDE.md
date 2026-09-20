@@ -20,7 +20,7 @@ several of those decisions look arbitrary until you know the reason.
 
 ```bash
 npm run dev            # http://localhost:5173  (port is pinned, see below)
-npm test               # 347 tests
+npm test               # 367 tests
 npm run test:watch
 npm run typecheck      # tsc -b across the workspace
 npm run content:check  # validate content/, report what the app had to guess
@@ -219,6 +219,23 @@ happened to be. Tapping a node now always starts a session scoped to that
 lesson (`startSession({ lexemeIds })`), whether or not it's "next" — see
 `PathScreen.tsx`. The mastery ring is still there; it just no longer gates.
 
+**The path is one collapsed card per unit, and only one is open.** Nine units
+of several lessons each is a long scroll before you reach the one you meant to
+study, which is the same "this never ends" feeling that killed the global
+Study button. So every section starts closed, and `chooseOpenUnit` picks the
+one to open: the unit answered most recently (`fsrs.last_review`, taken from
+*any* of a word's cards — typing a word is still working on it), unless that
+unit is both ≥90% mastered and untouched for three days, in which case you
+have plainly moved on and the path opens on the first section still under 90%.
+A closed card still lists the lesson names inside it, so choosing between
+sections never requires opening them one at a time, and shows mastered/total
+words for the section. The two states are deliberately asymmetric: closed, the
+whole card is the target; open, only the 52px header bar closes it again, so
+reaching for a lesson can never collapse the section under your finger. Which
+sections are open is **not** persisted — "everything closed but where I am" is
+recomputed on each mount, not a setting to maintain, which is also why leaving
+a session reopens the section you just studied without anything storing that.
+
 **Removing a word or a lesson hides it, it never deletes it.** Settings keeps
 an `excludedLexemeIds` set (`db.ts`/`store.ts`); the path, sessions and Extras
 all filter through `visibleLexemes()` before anything else touches the list.
@@ -401,8 +418,9 @@ for the user — see item 1 below.
 
 Working: content pipeline with validation and markdown-table support, FSRS-6
 scheduling, card generation with tier gating, leech detection, the full gym
-escalation, an unlocked path where tapping any lesson previews then studies
-it (never the whole course at once - there is no global Study button), a
+escalation, an unlocked path of collapsible unit sections where tapping any
+lesson previews then studies it (never the whole course at once - there is no
+global Study button), a
 Settings word list to remove or add words and lessons (search-filterable,
 non-destructive), Extras (writing practice + mnemonics), three exercises
 (flashcard / typing with an on-screen Hebrew keyboard / matching), mnemonic

@@ -143,34 +143,116 @@ input { font: inherit; }
 
 /* --- path --------------------------------------------------------------- */
 
-.path { display: flex; flex-direction: column; gap: 0; position: relative; }
+.path { display: flex; flex-direction: column; gap: 10px; position: relative; }
 
-.unit { position: relative; padding: 0 0 8px; }
+/*
+ * One card per unit, collapsed by default.
+ *
+ * Closed, the whole card is the button - the only thing a closed section can
+ * be wanted for is opening it. Open, the same button is only the header bar,
+ * so reaching for a lesson underneath can never collapse the section from
+ * under your finger.
+ */
+.unit {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
 
-.unit-head {
+.unit[data-open="true"] { background: var(--surface-2); padding-bottom: 18px; }
+
+.unit-toggle {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Finger-sized whether or not the title wraps. */
+.unit-bar {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 20px 0 12px;
+  min-height: 52px;
+  padding: 12px 16px;
 }
 
-.unit-head h2 {
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--text-dim);
-  margin: 0;
-  font-weight: 600;
-}
-
-.unit-head::after {
-  content: "";
+.unit-name {
   flex: 1;
-  height: 1px;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-transform: capitalize;
+}
+
+.unit-count {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.unit-count-of { color: var(--text-dim); }
+
+.chevron {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--text-dim);
+  transition: transform 140ms ease;
+}
+
+.unit[data-open="true"] .chevron { transform: rotate(180deg); }
+
+.unit-progress {
+  display: block;
+  height: 3px;
   background: var(--border);
 }
 
-.nodes { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.unit-progress-fill { display: block; height: 100%; background: var(--accent); }
+
+.unit-lessons {
+  display: block;
+  padding: 12px 16px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-dim);
+}
+
+/*
+ * Dot separators rather than boxes: this is a glance at what is inside, not a
+ * second row of controls competing with the lessons themselves.
+ *
+ * Ordinary inline flow, not flex-wrap, and the separator trails its own
+ * lesson behind a non-breaking space. Laid out as wrapping flex items instead,
+ * a separator is free to start the next line, so the list reads "Hello and
+ * goodbye / · Good wishes".
+ */
+/* The separator itself must stay breakable, or the nowrap below swallows the
+   one break opportunity in the whole list and it runs off in a single line. */
+.unit-lesson:not(:last-child)::after { content: "\00a0· "; white-space: normal; }
+
+/*
+ * A lesson name breaks between lessons, never through the middle of one.
+ * Plain inline, not inline-block: an inline-block drops the space at the end
+ * of its own ::after, and the separator ends up glued to the next lesson.
+ * An over-long name (lessons added in-app are named by hand) is clipped by
+ * the card rather than escaping it.
+ */
+.unit-lesson { white-space: nowrap; }
+
+.nodes {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding-top: 18px;
+}
 
 .node-row { display: flex; width: 100%; justify-content: center; }
 .node-row[data-offset="-1"] { justify-content: flex-start; padding-left: 14%; }
@@ -209,6 +291,10 @@ input { font: inherit; }
   border-radius: 50%;
   background: var(--bg);
 }
+
+/* The ring's inner disc has to match whatever it sits on, and inside an open
+   unit card that is the card, not the page. */
+.unit[data-open="true"] .node .ring::after { background: var(--surface-2); }
 
 .node-label {
   text-align: center;

@@ -10,13 +10,38 @@ import { LessonPreview } from './LessonPreview.js';
 const MIN_LESSON = 4;
 const MAX_LESSON = 8;
 
+/**
+ * When a unit stops counting as "the one you're working on".
+ *
+ * Nearly finished is not finished, so a section at 90% is still the one to
+ * open on - right up until it has also been left alone for a few days, at
+ * which point you have plainly moved on and opening it again would only show
+ * a wall of ticks.
+ */
+const SETTLED_MASTERY = 0.9;
+const SETTLED_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
+
 export interface LessonNode {
   id: string;
   unit: number;
   title: string;
   lexemes: Lexeme[];
+  /** Words in this lesson whose recall_he_en card has reached Review state. */
+  mastered: number;
   mastery: number;
+  /** Most recent answer to any card of any word in this lesson. */
+  lastStudiedAt?: number;
   status: 'available' | 'complete';
+}
+
+/** One collapsible section of the path: every lesson under one unit. */
+export interface UnitSummary {
+  unit: number;
+  nodes: LessonNode[];
+  words: number;
+  mastered: number;
+  mastery: number;
+  lastStudiedAt?: number;
 }
 
 /**
@@ -118,6 +143,16 @@ function splitEvenly(name: string, words: readonly Lexeme[]): { title: string; l
  * it just no longer gates anything.
  */
 export function buildPath(lexemes: readonly Lexeme[], cards: ReadonlyMap<string, Card>): LessonNode[] {
+  // When each word was last answered, taken from any of its cards rather than
+  // only the one mastery is measured on: typing a word is still working on it.
+  const lastByLexeme = new Map<string, number>();
+  for (const card of cards.values()) {
+    const at = card.fsrs.last_review;
+    if (at === undefined) continue;
+    const previous = lastByLexeme.get(card.lexemeId);
+    if (previous === undefined || at > previous) lastByLexeme.set(card.lexemeId, at);
+  }
+
   const byUnit = new Map<number, Lexeme[]>();
   for (const lexeme of lexemes) {
     const list = byUnit.get(lexeme.unit);
@@ -129,24 +164,85 @@ export function buildPath(lexemes: readonly Lexeme[], cards: ReadonlyMap<string,
   for (const [unit, words] of [...byUnit.entries()].sort((a, b) => a[0] - b[0])) {
     packLessons(words).forEach((lesson, index) => {
       let graduated = 0;
+      let lastStudiedAt: number | undefined;
       for (const lexeme of lesson.lexemes) {
         const card = cards.get(`${lexeme.id}:recall_he_en`);
         if (card && card.fsrs.state === 2) graduated++;
+        const at = lastByLexeme.get(lexeme.id);
+        if (at !== undefined && (lastStudiedAt === undefined || at > lastStudiedAt)) lastStudiedAt = at;
       }
       const mastery = lesson.lexemes.length === 0 ? 0 : graduated / lesson.lexemes.length;
 
-      nodes.push({
+      const node: LessonNode = {
         id: `u${unit}-l${index + 1}`,
         unit,
         title: lesson.title,
         lexemes: lesson.lexemes,
+        mastered: graduated,
         mastery,
         status: mastery >= 1 ? 'complete' : 'available',
-      });
+      };
+      // Absent, not undefined: a lesson never studied has no date at all.
+      if (lastStudiedAt !== undefined) node.lastStudiedAt = lastStudiedAt;
+      nodes.push(node);
     });
   }
 
   return nodes;
+}
+
+/** Fold the path's lessons back into the units they came from, in unit order. */
+export function buildUnits(nodes: readonly LessonNode[]): UnitSummary[] {
+  const byUnit = new Map<number, UnitSummary>();
+  for (const node of nodes) {
+    let summary = byUnit.get(node.unit);
+    if (!summary) {
+      summary = { unit: node.unit, nodes: [], words: 0, mastered: 0, mastery: 0 };
+      byUnit.set(node.unit, summary);
+    }
+    summary.nodes.push(node);
+    summary.words += node.lexemes.length;
+    summary.mastered += node.mastered;
+    if (
+      node.lastStudiedAt !== undefined &&
+      (summary.lastStudiedAt === undefined || node.lastStudiedAt > summary.lastStudiedAt)
+    ) {
+      summary.lastStudiedAt = node.lastStudiedAt;
+    }
+  }
+
+  const units = [...byUnit.values()].sort((a, b) => a.unit - b.unit);
+  for (const summary of units) {
+    summary.mastery = summary.words === 0 ? 0 : summary.mastered / summary.words;
+  }
+  return units;
+}
+
+/**
+ * Which section the path opens on.
+ *
+ * Nine units of several lessons each is a long scroll to reach the one you
+ * actually meant to study, so every section starts closed except the one you
+ * are working on - which is simply the one answered most recently. The
+ * exception is a section you have all but finished and then left alone: that
+ * one is behind you, so the path opens on the first section still worth work
+ * instead. Returns null when nothing qualifies, and everything stays closed.
+ */
+export function chooseOpenUnit(units: readonly UnitSummary[], now: number): number | null {
+  let recent: UnitSummary | undefined;
+  for (const unit of units) {
+    if (unit.lastStudiedAt === undefined) continue;
+    if (recent === undefined || unit.lastStudiedAt > (recent.lastStudiedAt ?? 0)) recent = unit;
+  }
+
+  if (
+    recent !== undefined &&
+    !(recent.mastery >= SETTLED_MASTERY && now - (recent.lastStudiedAt ?? 0) > SETTLED_AFTER_MS)
+  ) {
+    return recent.unit;
+  }
+
+  return units.find((u) => u.mastery < SETTLED_MASTERY)?.unit ?? null;
 }
 
 export interface PathScreenProps {
@@ -162,45 +258,102 @@ export interface LessonPathProps {
   onSelect: (node: LessonNode) => void;
 }
 
-/** The stepping-stone path itself. Every node is open; see `buildPath`. */
+/**
+ * The stepping-stone path itself: one collapsible card per unit, every lesson
+ * inside it open - see `buildPath` and `chooseOpenUnit`.
+ *
+ * The two states are deliberately asymmetric. Closed, the whole card is one
+ * target, because the only thing anyone can want from a closed section is to
+ * see inside it. Open, only the header bar closes it again, so reaching for a
+ * lesson can never shut the section from under your finger.
+ *
+ * Which sections are open is not persisted. "Everything closed but where I
+ * am" is a fresh answer to where you are now, not a setting to maintain.
+ */
 export function LessonPath({ nodes, unitTitles, onSelect }: LessonPathProps) {
-  const units = useMemo(() => {
-    const grouped = new Map<number, LessonNode[]>();
-    for (const node of nodes) {
-      const list = grouped.get(node.unit);
-      if (list) list.push(node);
-      else grouped.set(node.unit, [node]);
-    }
-    return [...grouped.entries()].sort((a, b) => a[0] - b[0]);
-  }, [nodes]);
+  const units = useMemo(() => buildUnits(nodes), [nodes]);
+  const [open, setOpen] = useState<ReadonlySet<number>>(() => {
+    const start = chooseOpenUnit(units, Date.now());
+    return new Set(start === null ? [] : [start]);
+  });
+
+  function toggle(unit: number) {
+    setOpen((current) => {
+      const next = new Set(current);
+      if (!next.delete(unit)) next.add(unit);
+      return next;
+    });
+  }
 
   return (
     <>
-      {units.map(([unit, unitNodes]) => (
-        <section key={unit} className="unit">
-          <div className="unit-head">
-            <h2>{unitTitles.get(unit) ?? `Unit ${unit}`}</h2>
-          </div>
-          <div className="nodes">
-            {unitNodes.map((node, i) => (
-              <div key={node.id} className="node-row" data-offset={[0, -1, 0, 1][i % 4]}>
-                <div>
-                  <button
-                    className="node"
-                    style={{ ['--mastery' as string]: node.mastery }}
-                    onClick={() => onSelect(node)}
-                    aria-label={`${node.title}, ${Math.round(node.mastery * 100)}% mastered`}
-                  >
-                    <span className="ring" aria-hidden="true" />
-                    <span className="glyph">{node.status === 'complete' ? '✓' : '✦'}</span>
-                  </button>
-                  <div className="node-label">{node.title}</div>
-                </div>
+      {units.map((summary) => {
+        const title = unitTitles.get(summary.unit) ?? `Unit ${summary.unit}`;
+        const isOpen = open.has(summary.unit);
+        const progress = `${summary.mastered} of ${summary.words} words mastered`;
+
+        return (
+          <section key={summary.unit} className="unit" data-open={isOpen}>
+            <button
+              className="unit-toggle"
+              onClick={() => toggle(summary.unit)}
+              aria-expanded={isOpen}
+              aria-controls={isOpen ? `unit-${summary.unit}-lessons` : undefined}
+              aria-label={`${isOpen ? 'Collapse' : 'Open'} ${title}, ${progress}`}
+            >
+              <span className="unit-bar">
+                <span className="unit-name">{title}</span>
+                <span className="unit-count">
+                  {summary.mastered}
+                  <span className="unit-count-of">/{summary.words}</span>
+                </span>
+                {/* Drawn rather than typed: the chevron characters sit off
+                    the optical centre of the bar and rotate untidily. */}
+                <svg className="chevron" viewBox="0 0 12 12" aria-hidden="true">
+                  <path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </span>
+
+              <span className="unit-progress" aria-hidden="true">
+                <span className="unit-progress-fill" style={{ width: `${summary.mastery * 100}%` }} />
+              </span>
+
+              {/* Closed, the section still says what is in it, so choosing
+                  between sections never needs opening them one by one. */}
+              {!isOpen && (
+                <span className="unit-lessons">
+                  {summary.nodes.map((node) => (
+                    <span key={node.id} className="unit-lesson">
+                      {node.title}
+                    </span>
+                  ))}
+                </span>
+              )}
+            </button>
+
+            {isOpen && (
+              <div className="nodes" id={`unit-${summary.unit}-lessons`}>
+                {summary.nodes.map((node, i) => (
+                  <div key={node.id} className="node-row" data-offset={[0, -1, 0, 1][i % 4]}>
+                    <div>
+                      <button
+                        className="node"
+                        style={{ ['--mastery' as string]: node.mastery }}
+                        onClick={() => onSelect(node)}
+                        aria-label={`${node.title}, ${Math.round(node.mastery * 100)}% mastered`}
+                      >
+                        <span className="ring" aria-hidden="true" />
+                        <span className="glyph">{node.status === 'complete' ? '✓' : '✦'}</span>
+                      </button>
+                      <div className="node-label">{node.title}</div>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </section>
-      ))}
+            )}
+          </section>
+        );
+      })}
     </>
   );
 }
