@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { useApp, visibleLexemes } from './store.js';
-import { PathScreen } from './screens/PathScreen.js';
+import { PathScreen, buildPath, courseProgress } from './screens/PathScreen.js';
 import { ExtrasScreen } from './screens/ExtrasScreen.js';
 import { SettingsScreen } from './screens/SettingsScreen.js';
 import { SessionScreen } from './screens/SessionScreen.js';
@@ -41,6 +41,11 @@ export function App() {
     return titles;
   }, [lexemes]);
 
+  // The whole course's standing, for the header. Counted over what the path
+  // shows, so a word removed in Settings stops counting here too.
+  const course = useMemo(() => courseProgress(buildPath(visible, cards)), [visible, cards]);
+  const share = (n: number) => (course.words === 0 ? 0 : (n / course.words) * 100);
+
   if (!ready) {
     return (
       <div className="app">
@@ -61,11 +66,26 @@ export function App() {
 
   return (
     <div className="app">
-      <header className="topbar">
-        <h1>Hebrew</h1>
-        <div className="stats">
-          <span className="pill">
-            <b>{lexemes.length}</b> words
+      <header className="masthead">
+        <div className="masthead-title">
+          <h1>Hebrew</h1>
+          <bdi className="he" lang="he" dir="rtl" aria-hidden="true">
+            עברית
+          </bdi>
+        </div>
+        <div className="course-bar" aria-hidden="true">
+          <span data-kind="known" style={{ width: `${share(course.mastered)}%` }} />
+          <span data-kind="learning" style={{ width: `${share(course.learning)}%` }} />
+        </div>
+        {/* "Known" rather than "mastered": the lesson preview says "mastered"
+            and sits under this header, and one screen should not carry two
+            numbers labelled the same way. */}
+        <div className="course-counts">
+          <span>
+            <b>{course.mastered}</b> of {course.words} words known
+          </span>
+          <span>
+            <b>{course.learning}</b> in progress
           </span>
         </div>
       </header>

@@ -37,13 +37,25 @@ export function SessionScreen({ plan, cursor, cards, lexemes, onFinish }: Sessio
     }
   };
 
+  const total = plan.items.length;
   const header = (
-    <div className="topbar">
-      <button className="pill" onClick={onFinish}>
-        Leave
+    <div className="session-top">
+      <button className="icon-btn" onClick={onFinish} aria-label="Leave">
+        <svg viewBox="0 0 14 14" aria-hidden="true">
+          <path d="M3 3l8 8M11 3l-8 8" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+        </svg>
       </button>
-      <div className="pill">
-        <b>{cursor + 1}</b> / {plan.items.length}
+      {/* One segment per card while they still fit a phone's width; past
+          that, a single bar says the same thing without turning to hairlines. */}
+      <div className="session-progress" aria-hidden="true" data-segmented={total <= 20}>
+        {total <= 20 ? (
+          plan.items.map((it, i) => <span key={it.cardId + i} data-state={i < cursor ? 'done' : i === cursor ? 'now' : 'todo'} />)
+        ) : (
+          <span data-state="done" style={{ width: `${(cursor / total) * 100}%` }} />
+        )}
+      </div>
+      <div className="session-count">
+        <b>{cursor + 1}</b>/{total}
       </div>
     </div>
   );
@@ -100,7 +112,11 @@ export function SessionScreen({ plan, cursor, cards, lexemes, onFinish }: Sessio
   return (
     <>
       {header}
-      {item.kind === 'new' && <div className="banner calm">New word</div>}
+      <div className="session-kind">
+        <span className="chip" data-kind={item.kind}>
+          {item.kind === 'new' ? 'New word' : 'Review'}
+        </span>
+      </div>
       <Flashcard
         card={card}
         lexeme={lexeme}
@@ -127,32 +143,26 @@ function Summary({
 
   return (
     <div className="stack">
-      <div className="topbar">
-        <h1>Session done</h1>
-      </div>
+      <h1 className="done-title">Session done</h1>
 
-      <div className="card" style={{ minHeight: 0, alignItems: 'stretch' }}>
-        <div className="row" style={{ justifyContent: 'space-around', width: '100%' }}>
-          <div className="center">
-            <div style={{ fontSize: 32, fontWeight: 700 }}>{results.length}</div>
-            <div className="muted">reviewed</div>
+      <div className="tiles" data-count="2">
+        <div className="tile">
+          <div className="tile-value">{results.length}</div>
+          <div className="tile-label">reviewed</div>
+        </div>
+        <div className="tile">
+          <div className="tile-value">
+            {results.length === 0
+              ? '—'
+              : `${Math.round((results.filter((r) => r.rating > 1).length / results.length) * 100)}%`}
           </div>
-          <div className="center">
-            <div style={{ fontSize: 32, fontWeight: 700 }}>
-              {results.length === 0
-                ? '—'
-                : `${Math.round((results.filter((r) => r.rating > 1).length / results.length) * 100)}%`}
-            </div>
-            <div className="muted">recalled</div>
-          </div>
+          <div className="tile-label">recalled</div>
         </div>
       </div>
 
       {struggled.length > 0 && (
         <div className="card" style={{ minHeight: 0, alignItems: 'stretch' }}>
-          <div className="muted" style={{ marginBottom: 4 }}>
-            Coming back sooner
-          </div>
+          <div className="sheet-label">Coming back sooner</div>
           {struggled.map((r, i) => {
             const lexeme = lexemeById.get(r.lexemeId);
             if (!lexeme) return null;

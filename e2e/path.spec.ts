@@ -10,7 +10,17 @@ import { openPath, openSection, openSections, studyLesson, answeredCardCount } f
  * PathScreen.test.tsx, and are not repeated.
  */
 
-test('opens the section you were last working in, and still does after a reload', async ({ page }) => {
+/**
+ * Where the open section's card sits in the viewport. Arriving on the path
+ * scrolls it to the top, so this is its scroll margin - not the hundreds of
+ * pixels of sections above it.
+ */
+async function openSectionTop(page: import('@playwright/test').Page, name: string): Promise<number> {
+  const box = await page.locator('.unit', { has: page.getByRole('button', { name: `Collapse ${name}` }) }).boundingBox();
+  return box?.y ?? Number.NaN;
+}
+
+test('opens the section you were last working in, scrolled to, and still does after a reload', async ({ page }) => {
   await openPath(page);
   expect(await openSections(page)).toEqual([expect.stringContaining('people')]);
 
@@ -21,10 +31,14 @@ test('opens the section you were last working in, and still does after a reload'
   // Coming out of a session rebuilds the path from scratch, so this is the
   // stored answers talking, not a leftover piece of component state.
   expect(await openSections(page)).toEqual([expect.stringContaining('animals')]);
+  // Unit 4: three sections sit above it, so an unscrolled page would put it
+  // far down the screen.
+  expect(await openSectionTop(page, 'animals')).toBeLessThan(40);
 
   await page.reload();
   await page.locator('.unit').first().waitFor();
   expect(await openSections(page)).toEqual([expect.stringContaining('animals')]);
+  expect(await openSectionTop(page, 'animals')).toBeLessThan(40);
 });
 
 test('says what is inside a closed section without needing it opened', async ({ page }) => {

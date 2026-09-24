@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Card, Lexeme } from '@lang/core';
 import { useApp } from '../store.js';
 import { LessonPreview } from './LessonPreview.js';
@@ -28,6 +28,12 @@ export interface LessonNode {
   lexemes: Lexeme[];
   /** Words in this lesson whose recall_he_en card has reached Review state. */
   mastered: number;
+  /**
+   * Words answered at least once, on any card, but not yet mastered. Mastery
+   * takes days of spaced reviews, so without this a whole first sitting on a
+   * lesson leaves it looking exactly as untouched as one never opened.
+   */
+  learning: number;
   mastery: number;
   /** Most recent answer to any card of any word in this lesson. */
   lastStudiedAt?: number;
@@ -160,14 +166,22 @@ export function buildPath(lexemes: readonly Lexeme[], cards: ReadonlyMap<string,
     else byUnit.set(lexeme.unit, [lexeme]);
   }
 
+  // Started means any card of the word has been answered, same as above.
+  const startedLexemes = new Set<string>();
+  for (const card of cards.values()) {
+    if (card.fsrs.state !== 0 || card.fsrs.last_review !== undefined) startedLexemes.add(card.lexemeId);
+  }
+
   const nodes: LessonNode[] = [];
   for (const [unit, words] of [...byUnit.entries()].sort((a, b) => a[0] - b[0])) {
     packLessons(words).forEach((lesson, index) => {
       let graduated = 0;
+      let learning = 0;
       let lastStudiedAt: number | undefined;
       for (const lexeme of lesson.lexemes) {
         const card = cards.get(`${lexeme.id}:recall_he_en`);
         if (card && card.fsrs.state === 2) graduated++;
+        else if (startedLexemes.has(lexeme.id)) learning++;
         const at = lastByLexeme.get(lexeme.id);
         if (at !== undefined && (lastStudiedAt === undefined || at > lastStudiedAt)) lastStudiedAt = at;
       }
@@ -179,6 +193,7 @@ export function buildPath(lexemes: readonly Lexeme[], cards: ReadonlyMap<string,
         title: lesson.title,
         lexemes: lesson.lexemes,
         mastered: graduated,
+        learning,
         mastery,
         status: mastery >= 1 ? 'complete' : 'available',
       };
@@ -189,6 +204,64 @@ export function buildPath(lexemes: readonly Lexeme[], cards: ReadonlyMap<string,
   }
 
   return nodes;
+}
+
+/** Mastered and in-progress words across everything on the path. */
+export function courseProgress(nodes: readonly LessonNode[]): { words: number; mastered: number; learning: number } {
+  let words = 0;
+  let mastered = 0;
+  let learning = 0;
+  for (const node of nodes) {
+    words += node.lexemes.length;
+    mastered += node.mastered;
+    learning += node.learning;
+  }
+  return { words, mastered, learning };
+}
+
+/**
+ * The lesson to mark "Continue": the one answered most recently, unless it is
+ * already mastered, in which case the most recent one that is not. A marker
+ * on a finished lesson would point back at something already done.
+ */
+export function chooseCurrentLesson(nodes: readonly LessonNode[]): LessonNode | null {
+  let current: LessonNode | null = null;
+  for (const node of nodes) {
+    if (node.status === 'complete' || node.lastStudiedAt === undefined) continue;
+    if (current === null || node.lastStudiedAt > (current.lastStudiedAt ?? 0)) current = node;
+  }
+  return current;
+}
+
+/**
+ * How a lesson sits on the page. Pressed in until it is started, raised the
+ * moment any word in it is answered, solid green once every word is mastered.
+ */
+export function lessonStage(
+  node: Pick<LessonNode, 'mastered' | 'learning' | 'lexemes'>,
+): 'new' | 'started' | 'mastered' {
+  if (node.lexemes.length > 0 && node.mastered === node.lexemes.length) return 'mastered';
+  return node.mastered + node.learning > 0 ? 'started' : 'new';
+}
+
+/**
+ * The two-tone ring as a conic gradient: mastered in dark green, in progress
+ * in light green after it, the rest as bare track.
+ */
+export function progressRing(mastered: number, learning: number, total: number): string {
+  const known = total === 0 ? 0 : (mastered / total) * 100;
+  const started = total === 0 ? 0 : ((mastered + learning) / total) * 100;
+  return `conic-gradient(var(--accent) 0 ${known}%, var(--learn) 0 ${started}%, var(--track) 0)`;
+}
+
+/** "2 known · 3 learning · 3 new", leaving out whatever is zero. */
+export function lessonBreakdown(mastered: number, learning: number, total: number): string {
+  const parts: string[] = [];
+  if (mastered > 0) parts.push(`${mastered} known`);
+  if (learning > 0) parts.push(`${learning} learning`);
+  const fresh = total - mastered - learning;
+  if (fresh > 0) parts.push(`${fresh} new`);
+  return parts.join(' · ');
 }
 
 /** Fold the path's lessons back into the units they came from, in unit order. */
@@ -272,10 +345,18 @@ export interface LessonPathProps {
  */
 export function LessonPath({ nodes, unitTitles, onSelect }: LessonPathProps) {
   const units = useMemo(() => buildUnits(nodes), [nodes]);
-  const [open, setOpen] = useState<ReadonlySet<number>>(() => {
-    const start = chooseOpenUnit(units, Date.now());
-    return new Set(start === null ? [] : [start]);
-  });
+  const [start] = useState(() => chooseOpenUnit(units, Date.now()));
+  const [open, setOpen] = useState<ReadonlySet<number>>(() => new Set(start === null ? [] : [start]));
+
+  // Arrive at the section you are working on rather than the top of the
+  // course: the path remounts on launch, on leaving a session and on backing
+  // out of a preview, and each time the open section used to sit somewhere
+  // below the fold. Only the section chosen on arrival - one opened by hand
+  // is already where the finger is, and jumping to it would be a lurch.
+  const startSection = useRef<HTMLElement>(null);
+  useEffect(() => {
+    startSection.current?.scrollIntoView({ block: 'start' });
+  }, []);
 
   function toggle(unit: number) {
     setOpen((current) => {
@@ -285,15 +366,25 @@ export function LessonPath({ nodes, unitTitles, onSelect }: LessonPathProps) {
     });
   }
 
+  const current = useMemo(() => chooseCurrentLesson(nodes), [nodes]);
+
   return (
     <>
       {units.map((summary) => {
         const title = unitTitles.get(summary.unit) ?? `Unit ${summary.unit}`;
         const isOpen = open.has(summary.unit);
         const progress = `${summary.mastered} of ${summary.words} words mastered`;
+        const learning = summary.nodes.reduce((n, node) => n + node.learning, 0);
+        const sample = summary.nodes[0]?.lexemes[0];
+        const here = summary.unit === start;
 
         return (
-          <section key={summary.unit} className="unit" data-open={isOpen}>
+          <section
+            key={summary.unit}
+            ref={here ? startSection : undefined}
+            className="unit"
+            data-open={isOpen}
+          >
             <button
               className="unit-toggle"
               onClick={() => toggle(summary.unit)}
@@ -302,52 +393,71 @@ export function LessonPath({ nodes, unitTitles, onSelect }: LessonPathProps) {
               aria-label={`${isOpen ? 'Collapse' : 'Open'} ${title}, ${progress}`}
             >
               <span className="unit-bar">
-                <span className="unit-name">{title}</span>
+                <span className="unit-heading">
+                  <span className="unit-eyebrow" data-here={here}>
+                    Unit {summary.unit}
+                    {here && ' · you are here'}
+                  </span>
+                  <span className="unit-name">{title}</span>
+                </span>
+                {!isOpen && sample && (
+                  <bdi className="he unit-sample" lang="he" dir="rtl">
+                    {sample.lemma}
+                  </bdi>
+                )}
                 <span className="unit-count">
                   {summary.mastered}
                   <span className="unit-count-of">/{summary.words}</span>
                 </span>
-                {/* Drawn rather than typed: the chevron characters sit off
-                    the optical centre of the bar and rotate untidily. */}
-                <svg className="chevron" viewBox="0 0 12 12" aria-hidden="true">
-                  <path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
+                {isOpen ? (
+                  <span
+                    className="mini-ring"
+                    aria-hidden="true"
+                    style={{ background: progressRing(summary.mastered, learning, summary.words) }}
+                  />
+                ) : (
+                  /* Drawn rather than typed: the chevron characters sit off
+                     the optical centre of the bar and rotate untidily. */
+                  <svg className="chevron" viewBox="0 0 12 12" aria-hidden="true">
+                    <path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
               </span>
 
-              <span className="unit-progress" aria-hidden="true">
-                <span className="unit-progress-fill" style={{ width: `${summary.mastery * 100}%` }} />
-              </span>
-
-              {/* Closed, the section still says what is in it, so choosing
-                  between sections never needs opening them one by one. */}
+              {/* Closed, the section still says how far along it is and what
+                  is in it, so choosing between sections never needs opening
+                  them one by one. */}
               {!isOpen && (
-                <span className="unit-lessons">
-                  {summary.nodes.map((node) => (
-                    <span key={node.id} className="unit-lesson">
-                      {node.title}
-                    </span>
-                  ))}
-                </span>
+                <>
+                  <span className="unit-progress" aria-hidden="true">
+                    <span className="unit-progress-fill" data-kind="known" style={{ width: `${summary.mastery * 100}%` }} />
+                    <span
+                      className="unit-progress-fill"
+                      data-kind="learning"
+                      style={{ width: `${summary.words === 0 ? 0 : (learning / summary.words) * 100}%` }}
+                    />
+                  </span>
+                  <span className="unit-lessons">
+                    {summary.nodes.map((node) => (
+                      <span key={node.id} className="unit-lesson">
+                        {node.title}
+                      </span>
+                    ))}
+                  </span>
+                </>
               )}
             </button>
 
             {isOpen && (
               <div className="nodes" id={`unit-${summary.unit}-lessons`}>
                 {summary.nodes.map((node, i) => (
-                  <div key={node.id} className="node-row" data-offset={[0, -1, 0, 1][i % 4]}>
-                    <div>
-                      <button
-                        className="node"
-                        style={{ ['--mastery' as string]: node.mastery }}
-                        onClick={() => onSelect(node)}
-                        aria-label={`${node.title}, ${Math.round(node.mastery * 100)}% mastered`}
-                      >
-                        <span className="ring" aria-hidden="true" />
-                        <span className="glyph">{node.status === 'complete' ? '✓' : '✦'}</span>
-                      </button>
-                      <div className="node-label">{node.title}</div>
-                    </div>
-                  </div>
+                  <LessonNodeButton
+                    key={node.id}
+                    node={node}
+                    offset={[0, -1, 0, 1][i % 4] ?? 0}
+                    current={node.id === current?.id}
+                    onSelect={onSelect}
+                  />
                 ))}
               </div>
             )}
@@ -355,6 +465,58 @@ export function LessonPath({ nodes, unitTitles, onSelect }: LessonPathProps) {
         );
       })}
     </>
+  );
+}
+
+/**
+ * One lesson on the path. The circle carries a real word from the lesson -
+ * it says what is inside, where a generic glyph said nothing - and its depth
+ * says how far along it is: see `lessonStage`.
+ */
+function LessonNodeButton({
+  node,
+  offset,
+  current,
+  onSelect,
+}: {
+  node: LessonNode;
+  offset: number;
+  current: boolean;
+  onSelect: (node: LessonNode) => void;
+}) {
+  const word = node.lexemes[0]?.lemma ?? '';
+  return (
+    <div className="node-row" data-offset={offset}>
+      <div className="node-cell">
+        {current && <span className="node-chip">Continue</span>}
+        <span className="node-well" data-current={current}>
+          <button
+            className="node"
+            data-stage={lessonStage(node)}
+            onClick={() => onSelect(node)}
+            aria-label={`${node.title}, ${Math.round(node.mastery * 100)}% mastered, ${node.learning} in progress`}
+          >
+            <span
+              className="node-ring"
+              style={{ background: progressRing(node.mastered, node.learning, node.lexemes.length) }}
+            >
+              <span className="node-disc">
+                {/* Sized by length, so a two-word lemma still fits the disc. */}
+                <bdi className="he node-word" lang="he" dir="rtl" data-long={word.length > 6 ? 2 : word.length > 4 ? 1 : 0}>
+                  {word}
+                </bdi>
+              </span>
+            </span>
+          </button>
+        </span>
+        <div className="node-label" data-current={current}>
+          {node.title}
+        </div>
+        {current && (
+          <div className="node-breakdown">{lessonBreakdown(node.mastered, node.learning, node.lexemes.length)}</div>
+        )}
+      </div>
+    </div>
   );
 }
 

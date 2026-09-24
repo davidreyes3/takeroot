@@ -20,9 +20,9 @@ several of those decisions look arbitrary until you know the reason.
 
 ```bash
 npm run dev            # http://localhost:5173  (port is pinned, see below)
-npm test               # 367 tests (vitest; does not include e2e)
+npm test               # 381 tests (vitest; does not include e2e)
 npm run test:watch
-npm run e2e            # 9 browser tests (Playwright; starts the server itself)
+npm run e2e            # 11 browser tests (Playwright; starts the server itself)
 npm run shots          # screenshots of the app -> e2e/shots/, gitignored
 npm run typecheck      # tsc -b across the workspace
 npm run content:check  # validate content/, report what the app had to guess
@@ -223,6 +223,21 @@ happened to be. Tapping a node now always starts a session scoped to that
 lesson (`startSession({ lexemeIds })`), whether or not it's "next" — see
 `PathScreen.tsx`. The mastery ring is still there; it just no longer gates.
 
+**A lesson shows progress before any word is mastered, and its depth is the
+signal.** Mastery (recall_he_en reaching Review) takes days of spaced
+reviews, so a ring that counted only mastered words left a lesson looking
+exactly as untouched after a whole first sitting as one never opened. Each
+lesson now counts `learning` too - words answered at least once, on any card,
+but not mastered - and the ring has two greens: dark for mastered, light for
+learning. The circle's depth follows `lessonStage`: pressed into the page
+while nothing in it has been answered, raised the moment anything has, a
+solid green dome once every word is mastered. Sunken is reserved for "not
+started" on purpose - a lesson you have begun must never look untouched.
+There is deliberately no line joining the lessons: the path is not an order,
+and a line drawn between them said it was. The course header reads "known"
+where the lesson preview reads "mastered", so one screen never carries two
+numbers under the same word.
+
 **The path is one collapsed card per unit, and only one is open.** Nine units
 of several lessons each is a long scroll before you reach the one you meant to
 study, which is the same "this never ends" feeling that killed the global
@@ -238,7 +253,10 @@ whole card is the target; open, only the 52px header bar closes it again, so
 reaching for a lesson can never collapse the section under your finger. Which
 sections are open is **not** persisted — "everything closed but where I am" is
 recomputed on each mount, not a setting to maintain, which is also why leaving
-a session reopens the section you just studied without anything storing that.
+a session reopens the section you just studied without anything storing that. The
+section chosen on arrival is also scrolled to the top of the screen (only that
+one - a section opened by hand is already under your finger), since arriving
+at the top of the course meant scrolling past every earlier unit each time.
 
 **Removing a word or a lesson hides it, it never deletes it.** Settings keeps
 an `excludedLexemeIds` set (`db.ts`/`store.ts`); the path, sessions and Extras
@@ -341,7 +359,7 @@ Conventions worth keeping:
 - Don't assert on `issues[0]` positionally — filter by severity.
 
 **The browser layer earns its keep only where jsdom cannot reach.** `npm run
-e2e` is nine tests, not a second copy of the suite: a real session writing
+e2e` is eleven tests (two of them only take screenshots), not a second copy of the suite: a real session writing
 through Dexie into real IndexedDB and a real reload reading it back, plus the
 handful of things that are about a finger on a screen (tapping anywhere on a
 closed card, a header bar big enough to hit). Rules that can be stated about a

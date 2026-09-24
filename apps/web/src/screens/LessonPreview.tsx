@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Card, SessionPlan } from '@lang/core';
 import { useApp } from '../store.js';
 import { Word } from '../components/Word.js';
-import type { LessonNode } from './PathScreen.js';
+import { lessonStage, progressRing, type LessonNode } from './PathScreen.js';
 
 export interface LessonPreviewProps {
   node: LessonNode;
@@ -11,9 +11,6 @@ export interface LessonPreviewProps {
   onBack: () => void;
   onStart: () => void;
 }
-
-/** How many words to show as a taste of the lesson, not the whole list. */
-const SAMPLE_SIZE = 3;
 
 /**
  * What tapping a lesson is actually going to ask of you, before you commit
@@ -60,64 +57,93 @@ export function LessonPreview({ node, unitTitle, cards, onBack, onStart }: Lesso
   const totalThisRound = plan?.items.length ?? null;
 
   return (
-    <div className="stack">
-      <div className="topbar">
-        <button className="pill" onClick={onBack}>
+    <div className="stack preview">
+      <div className="preview-top">
+        <button className="back-btn" onClick={onBack}>
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M10 3.5 5.5 8l4.5 4.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
           Back
         </button>
-        <div className="pill">
-          <b>{node.lexemes.length}</b> words
+        <span className="muted preview-unit">{unitTitle}</span>
+      </div>
+
+      <div className="preview-head">
+        <span className="node" data-stage={lessonStage(node)} aria-hidden="true">
+          <span
+            className="node-ring"
+            style={{ background: progressRing(node.mastered, node.learning, node.lexemes.length) }}
+          >
+            <span className="node-disc">
+              <bdi className="he node-word" lang="he" dir="rtl">
+                {node.lexemes[0]?.lemma}
+              </bdi>
+            </span>
+          </span>
+        </span>
+        <div>
+          <h1 className="preview-title">{node.title}</h1>
+          <div className="legend">
+            <span><i data-kind="known" />{node.mastered} known</span>
+            <span><i data-kind="learning" />{node.learning} learning</span>
+          </div>
         </div>
       </div>
 
-      <div>
-        <h1 style={{ fontSize: 22, margin: '0 0 2px' }}>{node.title}</h1>
-        <div className="muted">{unitTitle}</div>
+      <div className="tiles">
+        <Stat label="due" value={due} />
+        <Stat label="stuck" value={stuck} alert={stuck !== null && stuck > 0} />
+        <Stat label="new" value={notStarted} />
       </div>
-
-      <div className="meta">
-        {node.lexemes.slice(0, SAMPLE_SIZE).map((lexeme) => (
-          <span key={lexeme.id} className="tag">
-            <Word text={lexeme.lemma} hebrew /> — {lexeme.glosses[0]}
-          </span>
-        ))}
-        {node.lexemes.length > SAMPLE_SIZE && (
-          <span className="tag derived">+{node.lexemes.length - SAMPLE_SIZE} more</span>
+      <div className="muted" style={{ fontSize: 13, marginTop: -4 }}>
+        {Math.round(node.mastery * 100)}% mastered
+        {newThisRound !== null && newThisRound > 0 && (
+          <> · {newThisRound} new word{newThisRound === 1 ? '' : 's'} this round</>
         )}
       </div>
 
-      <div className="card" style={{ minHeight: 0, gap: 18 }}>
-        <div className="row" style={{ justifyContent: 'space-around', width: '100%' }}>
-          <Stat label="due" value={due} />
-          <Stat label="stuck" value={stuck} alert={stuck !== null && stuck > 0} />
-          <Stat label="new" value={notStarted} />
-        </div>
-        <div className="muted" style={{ fontSize: 13 }}>
-          {Math.round(node.mastery * 100)}% mastered
-          {newThisRound !== null && newThisRound > 0 && (
-            <> · {newThisRound} new word{newThisRound === 1 ? '' : 's'} this round</>
-          )}
-        </div>
-      </div>
+      <ul className="word-sheet">
+        {node.lexemes.map((lexeme) => (
+          <li key={lexeme.id} className="word-row">
+            <span className="dot" data-kind={wordKind(lexeme.id, cards)} aria-hidden="true" />
+            <span className="word-row-en">
+              <span>{lexeme.glosses[0]}</span>
+              {lexeme.translit.value && <span className="translit">{lexeme.translit.value}</span>}
+            </span>
+            <Word text={lexeme.lemma} hebrew />
+          </li>
+        ))}
+      </ul>
 
-      <button className="btn" onClick={onStart} disabled={plan !== null && plan.items.length === 0}>
-        {plan === null
-          ? 'Start'
-          : plan.items.length === 0
-            ? 'Nothing to study here right now'
-            : `Start — ${totalThisRound} card${totalThisRound === 1 ? '' : 's'}`}
-      </button>
+      {/* Held at the bottom of the screen, so the full word list never
+          pushes the one thing this screen is for out of reach. */}
+      <div className="sticky-action">
+        <button className="btn" onClick={onStart} disabled={plan !== null && plan.items.length === 0}>
+          {plan === null
+            ? 'Start'
+            : plan.items.length === 0
+              ? 'Nothing to study here right now'
+              : `Start — ${totalThisRound} card${totalThisRound === 1 ? '' : 's'}`}
+        </button>
+      </div>
     </div>
   );
 }
 
+/** Same three states as the lesson ring: mastered, answered, or untouched. */
+function wordKind(lexemeId: string, cards: ReadonlyMap<string, Card>): 'known' | 'learning' | 'new' {
+  if (cards.get(`${lexemeId}:recall_he_en`)?.fsrs.state === 2) return 'known';
+  for (const card of cards.values()) {
+    if (card.lexemeId === lexemeId && (card.fsrs.state !== 0 || card.fsrs.last_review !== undefined)) return 'learning';
+  }
+  return 'new';
+}
+
 function Stat({ label, value, alert = false }: { label: string; value: number | null; alert?: boolean }) {
   return (
-    <div className="center">
-      <div style={{ fontSize: 28, fontWeight: 700, color: alert ? 'var(--warn)' : undefined }}>
-        {value ?? '—'}
-      </div>
-      <div className="muted">{label}</div>
+    <div className="tile" data-alert={alert}>
+      <div className="tile-value">{value ?? '—'}</div>
+      <div className="tile-label">{label}</div>
     </div>
   );
 }

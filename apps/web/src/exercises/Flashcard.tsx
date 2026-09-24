@@ -64,8 +64,11 @@ export function Flashcard({ card, lexeme, desiredRetention, onAnswer }: Flashcar
 
   return (
     <div>
+      {/* Two cards peeking out behind this one: it reads as a deck being
+          worked through rather than one box redrawn. Purely decorative. */}
+      <div className="card-stack">
       <div className="card">
-        <div className="muted">{face.instruction}</div>
+        <div className="card-instruction">{face.instruction}</div>
         <Word text={face.prompt} hebrew={face.promptIsHebrew} size="prompt" />
 
         {revealed && (
@@ -83,6 +86,7 @@ export function Flashcard({ card, lexeme, desiredRetention, onAnswer }: Flashcar
             )}
           </>
         )}
+      </div>
       </div>
 
       {!revealed ? (

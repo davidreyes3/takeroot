@@ -63,3 +63,13 @@ if (typeof window !== 'undefined' && !window.URL.createObjectURL) {
     configurable: true,
   });
 }
+
+/**
+ * Provide `Element.prototype.scrollIntoView` when the DOM environment lacks
+ * it. jsdom lays nothing out, so it ships no scrolling at all; the path
+ * scrolls its open section into view on arrival. A no-op here, same rule as
+ * above - tests that care about the scroll replace it with a recorder.
+ */
+if (typeof Element !== 'undefined' && !Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}

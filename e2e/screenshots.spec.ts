@@ -33,6 +33,40 @@ for (const scheme of ['light', 'dark'] as const) {
 
       expect(errors).toEqual([]);
     });
+
+    test(`one lesson, from preview to summary and back (${scheme})`, async ({ page }) => {
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(String(error)));
+
+      await openPath(page);
+      await page.getByRole('button', { name: /^Pronouns,/ }).click();
+      await page.getByRole('button', { name: /^Start/ }).waitFor();
+      await page.screenshot({ path: `${OUT}/preview-${scheme}.png`, fullPage: true });
+
+      await page.getByRole('button', { name: /^Start/ }).click();
+      const reveal = page.getByRole('button', { name: 'Show answer' });
+      const summary = page.getByRole('button', { name: 'Back to the path' });
+      await reveal.waitFor();
+      await page.screenshot({ path: `${OUT}/card-${scheme}.png` });
+
+      // Easy on a new card goes straight to Review, so some of the lesson
+      // comes back mastered and some only started: both ring colours.
+      for (let i = 0; i < 40; i++) {
+        await expect(reveal.or(summary)).toBeVisible();
+        if (await summary.isVisible()) break;
+        await reveal.click();
+        if (i === 0) await page.screenshot({ path: `${OUT}/card-revealed-${scheme}.png` });
+        await page.getByRole('button', { name: i % 2 === 0 ? /^Easy/ : /^Again/ }).click();
+      }
+      await page.screenshot({ path: `${OUT}/summary-${scheme}.png`, fullPage: true });
+
+      await summary.click();
+      await page.locator('.unit').first().waitFor();
+      await page.screenshot({ path: `${OUT}/path-started-${scheme}.png`, fullPage: true });
+      await page.locator('.unit').first().screenshot({ path: `${OUT}/section-started-${scheme}.png` });
+
+      expect(errors).toEqual([]);
+    });
   });
 }
 

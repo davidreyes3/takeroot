@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, cleanup, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Card, CardTemplate, Lexeme } from '@lang/core';
 import { newCard } from '@lang/core';
-import { packLessons, buildPath, buildUnits, chooseOpenUnit, LessonPath } from './PathScreen.js';
+import { packLessons, buildPath, buildUnits, chooseOpenUnit, chooseCurrentLesson, courseProgress, LessonPath } from './PathScreen.js';
 import type { UnitSummary } from './PathScreen.js';
 
 afterEach(cleanup);
@@ -185,6 +185,59 @@ describe('buildPath', () => {
   });
 });
 
+describe('progress before mastery', () => {
+  // Regression: a lesson showed no progress at all until a word graduated,
+  // which takes days of spaced reviews - a whole first sitting on a lesson
+  // left its ring exactly as empty as one never opened.
+  const words = [...group('Greetings', 6), ...group('Pronouns', 6)];
+
+  it('counts a word as in progress once any of its cards has been answered', () => {
+    const cards = cardsWith(words, { studied: { 'Greetings-0': T0, 'Greetings-1': T0 } });
+    const [greetings, pronouns] = buildPath(words, cards);
+    expect(greetings?.learning).toBe(2);
+    expect(greetings?.mastered).toBe(0);
+    expect(pronouns?.learning).toBe(0);
+  });
+
+  it('counts an answer on any card of the word, not only the one mastery reads', () => {
+    const cards = cardsWith(words, { studied: { 'Greetings-0': T0 }, studiedTemplate: 'type_he' });
+    expect(buildPath(words, cards)[0]?.learning).toBe(1);
+  });
+
+  it('never counts a word as both mastered and in progress', () => {
+    const cards = cardsWith(words, { mastered: ['Greetings-0'], studied: { 'Greetings-0': T0 } });
+    const [greetings] = buildPath(words, cards);
+    expect(greetings?.mastered).toBe(1);
+    expect(greetings?.learning).toBe(0);
+  });
+
+  it('adds up across the whole course for the header', () => {
+    const cards = cardsWith(words, { mastered: ['Greetings-0'], studied: { 'Greetings-0': T0, 'Pronouns-2': T0 } });
+    expect(courseProgress(buildPath(words, cards))).toEqual({ words: 12, mastered: 1, learning: 1 });
+  });
+});
+
+describe('chooseCurrentLesson', () => {
+  const words = [...group('Greetings', 6), ...group('Pronouns', 6), ...group('Colours', 6, 2)];
+
+  it('is the lesson answered most recently', () => {
+    const cards = cardsWith(words, { studied: { 'Greetings-0': T0, 'Colours-2': T0 + DAY } });
+    expect(chooseCurrentLesson(buildPath(words, cards))?.title).toBe('Colours');
+  });
+
+  it('is never a lesson already mastered', () => {
+    const cards = cardsWith(words, {
+      mastered: group('Colours', 6, 2).map((w) => w.id),
+      studied: { 'Greetings-0': T0, 'Colours-2': T0 + DAY },
+    });
+    expect(chooseCurrentLesson(buildPath(words, cards))?.title).toBe('Greetings');
+  });
+
+  it('is nothing before anything has been studied', () => {
+    expect(chooseCurrentLesson(buildPath(words, cardsWith(words)))).toBeNull();
+  });
+});
+
 describe('buildUnits', () => {
   const words = [...group('Greetings', 6), ...group('Pronouns', 6), ...group('Colours', 6, 2)];
 
@@ -341,5 +394,70 @@ describe('LessonPath', () => {
     show(cardsWith(words));
     expect(screen.getByRole('button', { name: /^Greetings,/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /^Pronouns,/ })).toBeTruthy();
+  });
+
+  /** How a lesson sits on the page: pressed in, raised, or finished. */
+  function stageOf(title: string) {
+    return screen.getByRole('button', { name: new RegExp(`^${title},`) }).getAttribute('data-stage');
+  }
+
+  it('leaves a lesson pressed into the page until it is started, then raises it', () => {
+    show(cardsWith(words, { studied: { 'Greetings-0': Date.now() } }));
+    expect(stageOf('Greetings')).toBe('started');
+    expect(stageOf('Pronouns')).toBe('new');
+  });
+
+  it('marks a lesson finished only once every word is mastered', () => {
+    show(cardsWith(words, { mastered: group('Greetings', 6).map((w) => w.id) }));
+    expect(stageOf('Greetings')).toBe('mastered');
+  });
+
+  it('says how far into a lesson you are, counting words still in progress', () => {
+    show(cardsWith(words, { mastered: ['Greetings-0'], studied: { 'Greetings-1': Date.now() } }));
+    const label = screen.getByRole('button', { name: /^Greetings,/ }).getAttribute('aria-label');
+    expect(label).toContain('17% mastered');
+    expect(label).toContain('1 in progress');
+  });
+
+  it('offers to continue the lesson you were last on, and only that one', () => {
+    show(cardsWith(words, { studied: { 'Greetings-0': Date.now() } }));
+    expect(screen.getAllByText('Continue')).toHaveLength(1);
+    expect(screen.getByText('1 learning · 5 new')).toBeTruthy();
+  });
+
+  describe('scrolling', () => {
+    // jsdom lays nothing out; vitest.setup.ts gives it a no-op to replace.
+    const scrolled: Element[] = [];
+    const original = Element.prototype.scrollIntoView;
+    beforeEach(() => {
+      scrolled.length = 0;
+      Element.prototype.scrollIntoView = function (this: Element) {
+        scrolled.push(this);
+      };
+    });
+    afterEach(() => {
+      Element.prototype.scrollIntoView = original;
+    });
+
+    it('brings the open section into view when the path appears', () => {
+      // Regression: the path always opened at the very top, so reaching the
+      // section you were working on meant scrolling past every one before it,
+      // on every launch and every return from a lesson.
+      show(cardsWith(words, { studied: { 'Colours-0': Date.now() } }));
+      expect(scrolled).toHaveLength(1);
+      expect(within(scrolled[0] as HTMLElement).getByRole('button', { name: /^Collapse colours/ })).toBeTruthy();
+    });
+
+    it('does not move the page when a section is opened by hand', async () => {
+      show(cardsWith(words));
+      await userEvent.click(screen.getByRole('button', { name: /^Open colours/ }));
+      expect(scrolled).toHaveLength(1);
+    });
+
+    it('stays put when nothing is open', () => {
+      show(cardsWith(words, { mastered: words.map((w) => w.id), studied: { 'Colours-0': Date.now() - 10 * DAY } }));
+      expect(openSections()).toEqual([]);
+      expect(scrolled).toHaveLength(0);
+    });
   });
 });
